@@ -4,7 +4,399 @@
   "step_seconds": 5,
   "window_count": 10614,
   "label_counts": {
-    "af": 622,
-    "non_af": 9992
+    "strong_af": 622,
+    "possible_af": 5254,
+    "non_af": 4738
+  },
+  "enhanced_label_counts": {
+    "enhanced_af": 3006,
+    "non_af": 7608
+  },
+  "enhanced_segment_count": 54,
+  "enhanced_segments": [
+    {
+      "start_ms": 0,
+      "end_ms": 1975000,
+      "strong_windows": 75,
+      "possible_windows": 280,
+      "window_count": 355
+    },
+    {
+      "start_ms": 2010000,
+      "end_ms": 3365000,
+      "strong_windows": 144,
+      "possible_windows": 110,
+      "window_count": 254
+    },
+    {
+      "start_ms": 3445000,
+      "end_ms": 3690000,
+      "strong_windows": 2,
+      "possible_windows": 30,
+      "window_count": 32
+    },
+    {
+      "start_ms": 4395000,
+      "end_ms": 4570000,
+      "strong_windows": 6,
+      "possible_windows": 24,
+      "window_count": 30
+    },
+    {
+      "start_ms": 5055000,
+      "end_ms": 5225000,
+      "strong_windows": 2,
+      "possible_windows": 27,
+      "window_count": 29
+    },
+    {
+      "start_ms": 5270000,
+      "end_ms": 5425000,
+      "strong_windows": 2,
+      "possible_windows": 21,
+      "window_count": 23
+    },
+    {
+      "start_ms": 5495000,
+      "end_ms": 6080000,
+      "strong_windows": 20,
+      "possible_windows": 68,
+      "window_count": 88
+    },
+    {
+      "start_ms": 6180000,
+      "end_ms": 6555000,
+      "strong_windows": 6,
+      "possible_windows": 45,
+      "window_count": 51
+    },
+    {
+      "start_ms": 6775000,
+      "end_ms": 6970000,
+      "strong_windows": 5,
+      "possible_windows": 25,
+      "window_count": 30
+    },
+    {
+      "start_ms": 7520000,
+      "end_ms": 7655000,
+      "strong_windows": 3,
+      "possible_windows": 15,
+      "window_count": 18
+    },
+    {
+      "start_ms": 7870000,
+      "end_ms": 8300000,
+      "strong_windows": 26,
+      "possible_windows": 44,
+      "window_count": 70
+    },
+    {
+      "start_ms": 8340000,
+      "end_ms": 8625000,
+      "strong_windows": 12,
+      "possible_windows": 29,
+      "window_count": 41
+    },
+    {
+      "start_ms": 8920000,
+      "end_ms": 9175000,
+      "strong_windows": 3,
+      "possible_windows": 37,
+      "window_count": 40
+    },
+    {
+      "start_ms": 9590000,
+      "end_ms": 9725000,
+      "strong_windows": 1,
+      "possible_windows": 21,
+      "window_count": 22
+    },
+    {
+      "start_ms": 10105000,
+      "end_ms": 10255000,
+      "strong_windows": 1,
+      "possible_windows": 24,
+      "window_count": 25
+    },
+    {
+      "start_ms": 10360000,
+      "end_ms": 10525000,
+      "strong_windows": 6,
+      "possible_windows": 19,
+      "window_count": 25
+    },
+    {
+      "start_ms": 10590000,
+      "end_ms": 10905000,
+      "strong_windows": 7,
+      "possible_windows": 44,
+      "window_count": 51
+    },
+    {
+      "start_ms": 11185000,
+      "end_ms": 11410000,
+      "strong_windows": 6,
+      "possible_windows": 34,
+      "window_count": 40
+    },
+    {
+      "start_ms": 11500000,
+      "end_ms": 11635000,
+      "strong_windows": 2,
+      "possible_windows": 18,
+      "window_count": 20
+    },
+    {
+      "start_ms": 11780000,
+      "end_ms": 12045000,
+      "strong_windows": 5,
+      "possible_windows": 43,
+      "window_count": 48
+    },
+    {
+      "start_ms": 12195000,
+      "end_ms": 12895000,
+      "strong_windows": 13,
+      "possible_windows": 112,
+      "window_count": 125
+    },
+    {
+      "start_ms": 12995000,
+      "end_ms": 13215000,
+      "strong_windows": 9,
+      "possible_windows": 26,
+      "window_count": 35
+    },
+    {
+      "start_ms": 13540000,
+      "end_ms": 13690000,
+      "strong_windows": 1,
+      "possible_windows": 18,
+      "window_count": 19
+    },
+    {
+      "start_ms": 13775000,
+      "end_ms": 14405000,
+      "strong_windows": 28,
+      "possible_windows": 71,
+      "window_count": 99
+    },
+    {
+      "start_ms": 14540000,
+      "end_ms": 15505000,
+      "strong_windows": 15,
+      "possible_windows": 147,
+      "window_count": 162
+    },
+    {
+      "start_ms": 15860000,
+      "end_ms": 16000000,
+      "strong_windows": 2,
+      "possible_windows": 21,
+      "window_count": 23
+    },
+    {
+      "start_ms": 16325000,
+      "end_ms": 16440000,
+      "strong_windows": 2,
+      "possible_windows": 15,
+      "window_count": 17
+    },
+    {
+      "start_ms": 17060000,
+      "end_ms": 17955000,
+      "strong_windows": 34,
+      "possible_windows": 115,
+      "window_count": 149
+    },
+    {
+      "start_ms": 18125000,
+      "end_ms": 18365000,
+      "strong_windows": 5,
+      "possible_windows": 21,
+      "window_count": 26
+    },
+    {
+      "start_ms": 19110000,
+      "end_ms": 19370000,
+      "strong_windows": 2,
+      "possible_windows": 39,
+      "window_count": 41
+    },
+    {
+      "start_ms": 19455000,
+      "end_ms": 19795000,
+      "strong_windows": 3,
+      "possible_windows": 46,
+      "window_count": 49
+    },
+    {
+      "start_ms": 19870000,
+      "end_ms": 20165000,
+      "strong_windows": 3,
+      "possible_windows": 42,
+      "window_count": 45
+    },
+    {
+      "start_ms": 20280000,
+      "end_ms": 20395000,
+      "strong_windows": 2,
+      "possible_windows": 15,
+      "window_count": 17
+    },
+    {
+      "start_ms": 20560000,
+      "end_ms": 20830000,
+      "strong_windows": 4,
+      "possible_windows": 30,
+      "window_count": 34
+    },
+    {
+      "start_ms": 21815000,
+      "end_ms": 22080000,
+      "strong_windows": 15,
+      "possible_windows": 28,
+      "window_count": 43
+    },
+    {
+      "start_ms": 26650000,
+      "end_ms": 26745000,
+      "strong_windows": 2,
+      "possible_windows": 11,
+      "window_count": 13
+    },
+    {
+      "start_ms": 31730000,
+      "end_ms": 31930000,
+      "strong_windows": 9,
+      "possible_windows": 24,
+      "window_count": 33
+    },
+    {
+      "start_ms": 32040000,
+      "end_ms": 32175000,
+      "strong_windows": 1,
+      "possible_windows": 15,
+      "window_count": 16
+    },
+    {
+      "start_ms": 35220000,
+      "end_ms": 35335000,
+      "strong_windows": 1,
+      "possible_windows": 16,
+      "window_count": 17
+    },
+    {
+      "start_ms": 37435000,
+      "end_ms": 37595000,
+      "strong_windows": 3,
+      "possible_windows": 24,
+      "window_count": 27
+    },
+    {
+      "start_ms": 37660000,
+      "end_ms": 38010000,
+      "strong_windows": 13,
+      "possible_windows": 47,
+      "window_count": 60
+    },
+    {
+      "start_ms": 40080000,
+      "end_ms": 40605000,
+      "strong_windows": 10,
+      "possible_windows": 65,
+      "window_count": 75
+    },
+    {
+      "start_ms": 42695000,
+      "end_ms": 42975000,
+      "strong_windows": 6,
+      "possible_windows": 35,
+      "window_count": 41
+    },
+    {
+      "start_ms": 44800000,
+      "end_ms": 44935000,
+      "strong_windows": 2,
+      "possible_windows": 13,
+      "window_count": 15
+    },
+    {
+      "start_ms": 45215000,
+      "end_ms": 45635000,
+      "strong_windows": 6,
+      "possible_windows": 64,
+      "window_count": 70
+    },
+    {
+      "start_ms": 45775000,
+      "end_ms": 45925000,
+      "strong_windows": 1,
+      "possible_windows": 23,
+      "window_count": 24
+    },
+    {
+      "start_ms": 46100000,
+      "end_ms": 46935000,
+      "strong_windows": 63,
+      "possible_windows": 83,
+      "window_count": 146
+    },
+    {
+      "start_ms": 46990000,
+      "end_ms": 47655000,
+      "strong_windows": 11,
+      "possible_windows": 100,
+      "window_count": 111
+    },
+    {
+      "start_ms": 47705000,
+      "end_ms": 48000000,
+      "strong_windows": 11,
+      "possible_windows": 33,
+      "window_count": 44
+    },
+    {
+      "start_ms": 48045000,
+      "end_ms": 48215000,
+      "strong_windows": 3,
+      "possible_windows": 26,
+      "window_count": 29
+    },
+    {
+      "start_ms": 48580000,
+      "end_ms": 48940000,
+      "strong_windows": 5,
+      "possible_windows": 52,
+      "window_count": 57
+    },
+    {
+      "start_ms": 49200000,
+      "end_ms": 49350000,
+      "strong_windows": 1,
+      "possible_windows": 23,
+      "window_count": 24
+    },
+    {
+      "start_ms": 49890000,
+      "end_ms": 50020000,
+      "strong_windows": 1,
+      "possible_windows": 15,
+      "window_count": 16
+    },
+    {
+      "start_ms": 50115000,
+      "end_ms": 50235000,
+      "strong_windows": 1,
+      "possible_windows": 11,
+      "window_count": 12
+    }
+  ],
+  "strong_possible_merge": {
+    "possible_attach_gap_ms": 30000,
+    "bridge_gap_ms": 30000,
+    "final_min_duration_ms": 30000,
+    "min_strong_windows_per_event": 1
   }
 }

@@ -18,6 +18,7 @@ from matplotlib.patches import Patch
 LABEL_COLORS = {
     "strong_af": "#d73027",
     "possible_af": "#fdae61",
+    "enhanced_af": "#7b3294",
     "non_af": "#9e9e9e",
     "af": "#d73027",
 }
@@ -28,22 +29,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--windows-csv", required=True, help="RR 2D filter window CSV path.")
     parser.add_argument("--beat-csv", default="", help="Optional beat CSV for full timeline duration.")
     parser.add_argument("--out-figure", required=True, help="Output figure path, e.g. .pdf or .png.")
+    parser.add_argument(
+        "--label-column",
+        choices=["label", "enhanced_label"],
+        default="enhanced_label",
+        help="Window label column to plot. Defaults to enhanced_label when present.",
+    )
     return parser.parse_args()
 
 
-def load_windows(path: str | Path) -> list[dict[str, Any]]:
+def load_windows(path: str | Path, label_column: str = "enhanced_label") -> list[dict[str, Any]]:
     csv_path = Path(path)
     with csv_path.open(newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
+        fieldnames = set(reader.fieldnames or [])
         required = {"start_ms", "end_ms", "label"}
-        missing = required - set(reader.fieldnames or [])
+        missing = required - fieldnames
         if missing:
             raise SystemExit(f"Missing required columns in {csv_path}: {sorted(missing)}")
+        actual_label_column = label_column if label_column in fieldnames else "label"
         return [
             {
                 "start_ms": int(float(row["start_ms"])),
                 "end_ms": int(float(row["end_ms"])),
-                "label": row["label"],
+                "label": row.get(actual_label_column) or row["label"],
+                "raw_label": row["label"],
                 "occupied_ratio": float(row.get("occupied_ratio") or 0.0),
                 "max_bin_ratio": float(row.get("max_bin_ratio") or 0.0),
             }
@@ -116,7 +126,7 @@ def plot_timeline(windows: list[dict[str, Any]], duration_ms: int, out_path: str
         color = LABEL_COLORS.get(str(segment["label"]), "#7f7f7f")
         ax.broken_barh([(start_h, width_h)], (0.78, 0.44), facecolors=color, edgecolors="none", alpha=0.85)
 
-    label_counts = {label: sum(window["label"] == label for window in windows) for label in LABEL_COLORS}
+    label_counts = {label: sum(window["label"] == label for window in windows) for label in LABEL_COLORS if any(window["label"] == label for window in windows)}
     ax.set_title("RR 2D Filter Timeline", fontsize=20, fontweight="bold", pad=14)
     ax.set_xlabel("Elapsed time (HH:MM)", fontsize=13, fontweight="bold")
     ax.set_yticks([1.0], ["RR 2D windows"])
@@ -142,7 +152,7 @@ def plot_timeline(windows: list[dict[str, Any]], duration_ms: int, out_path: str
 
 def main() -> None:
     args = parse_args()
-    windows = load_windows(args.windows_csv)
+    windows = load_windows(args.windows_csv, label_column=args.label_column)
     duration_ms = load_duration_ms(args.beat_csv, windows)
     plot_timeline(windows=windows, duration_ms=duration_ms, out_path=args.out_figure)
     print(f"windows={len(windows)}")

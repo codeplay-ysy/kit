@@ -20,6 +20,10 @@ AF_OCCUPIED_THRESHOLD = 0.06
 AF_MAX_BIN_THRESHOLD = 0.20
 AF_POSSIBLE_OCCUPIED_THRESHOLD = 0.045
 AF_POSSIBLE_MAX_BIN_THRESHOLD = 0.25
+AF_POSSIBLE_ATTACH_GAP_MS = 30_000
+AF_BRIDGE_GAP_MS = 30_000
+AF_FINAL_MIN_DURATION_MS = 30_000
+AF_MIN_STRONG_WINDOWS_PER_EVENT = 1
 ECTOPY_OCCUPIED_THRESHOLD = 0.04
 ECTOPY_MAX_BIN_THRESHOLD = 0.30
 
@@ -210,6 +214,103 @@ def evaluate_rr_2d_filter(rr_ms: np.ndarray | list[int] | list[float]) -> dict[s
     return result
 
 
+def _window_distance_ms(left: dict[str, Any], right: dict[str, Any]) -> int:
+    if int(left["end_ms"]) < int(right["start_ms"]):
+        return int(right["start_ms"]) - int(left["end_ms"])
+    if int(right["end_ms"]) < int(left["start_ms"]):
+        return int(left["start_ms"]) - int(right["end_ms"])
+    return 0
+
+
+def _is_possible_near_strong(window: dict[str, Any], strong_windows: list[dict[str, Any]], attach_gap_ms: int) -> bool:
+    return any(_window_distance_ms(window, strong_window) <= attach_gap_ms for strong_window in strong_windows)
+
+
+def _enhanced_af_segments(
+    windows: list[dict[str, Any]],
+    bridge_gap_ms: int,
+    final_min_duration_ms: int,
+    min_strong_windows: int,
+) -> list[dict[str, Any]]:
+    candidates = [window for window in windows if window.get("enhanced_label") == "enhanced_af"]
+    if not candidates:
+        return []
+
+    ordered = sorted(candidates, key=lambda item: (int(item["start_ms"]), int(item["end_ms"])))
+    segments: list[dict[str, Any]] = []
+    current = {
+        "start_ms": int(ordered[0]["start_ms"]),
+        "end_ms": int(ordered[0]["end_ms"]),
+        "strong_windows": 1 if ordered[0]["label"] == "strong_af" else 0,
+        "possible_windows": 1 if ordered[0]["label"] == "possible_af" else 0,
+        "window_count": 1,
+    }
+
+    for window in ordered[1:]:
+        start_ms = int(window["start_ms"])
+        end_ms = int(window["end_ms"])
+        if start_ms - int(current["end_ms"]) <= bridge_gap_ms:
+            current["end_ms"] = max(int(current["end_ms"]), end_ms)
+            current["strong_windows"] = int(current["strong_windows"]) + (1 if window["label"] == "strong_af" else 0)
+            current["possible_windows"] = int(current["possible_windows"]) + (1 if window["label"] == "possible_af" else 0)
+            current["window_count"] = int(current["window_count"]) + 1
+        else:
+            segments.append(current)
+            current = {
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "strong_windows": 1 if window["label"] == "strong_af" else 0,
+                "possible_windows": 1 if window["label"] == "possible_af" else 0,
+                "window_count": 1,
+            }
+    segments.append(current)
+
+    return [
+        segment
+        for segment in segments
+        if int(segment["end_ms"]) - int(segment["start_ms"]) >= final_min_duration_ms
+        and int(segment["strong_windows"]) >= min_strong_windows
+    ]
+
+
+def apply_enhanced_af_merge(
+    rows: list[dict[str, Any]],
+    attach_gap_ms: int = AF_POSSIBLE_ATTACH_GAP_MS,
+    bridge_gap_ms: int = AF_BRIDGE_GAP_MS,
+    final_min_duration_ms: int = AF_FINAL_MIN_DURATION_MS,
+    min_strong_windows: int = AF_MIN_STRONG_WINDOWS_PER_EVENT,
+) -> list[dict[str, Any]]:
+    strong_windows = [row for row in rows if row["label"] == "strong_af"]
+    for row in rows:
+        if row["label"] == "strong_af":
+            row["enhanced_label"] = "enhanced_af"
+            row["enhanced_reason"] = "strong_seed"
+        elif row["label"] == "possible_af" and _is_possible_near_strong(row, strong_windows, attach_gap_ms):
+            row["enhanced_label"] = "enhanced_af"
+            row["enhanced_reason"] = f"possible_near_strong_{attach_gap_ms}ms"
+        else:
+            row["enhanced_label"] = "non_af"
+            row["enhanced_reason"] = "possible_without_nearby_strong" if row["label"] == "possible_af" else "non_af"
+
+    segments = _enhanced_af_segments(
+        rows,
+        bridge_gap_ms=bridge_gap_ms,
+        final_min_duration_ms=final_min_duration_ms,
+        min_strong_windows=min_strong_windows,
+    )
+    for row in rows:
+        if row["enhanced_label"] != "enhanced_af":
+            continue
+        in_final_segment = any(
+            int(row["start_ms"]) < int(segment["end_ms"]) and int(row["end_ms"]) > int(segment["start_ms"])
+            for segment in segments
+        )
+        if not in_final_segment:
+            row["enhanced_label"] = "non_af"
+            row["enhanced_reason"] = "filtered_short_or_weak_segment"
+    return segments
+
+
 def slice_window_rr(series: BeatSeries, start_ms: int, end_ms: int) -> np.ndarray:
     mask = (series.offsets_ms >= start_ms) & (series.offsets_ms < end_ms)
     return series.rr_ms[mask]
@@ -239,8 +340,11 @@ def classify_series(series: BeatSeries, window_seconds: int, step_seconds: int) 
                 "max_bin_ratio": stats["max_bin_ratio"],
                 "median_rr_ms": stats["median_rr_ms"],
                 "label": stats["label"],
+                "enhanced_label": "non_af",
+                "enhanced_reason": "not_evaluated",
             }
         )
+    apply_enhanced_af_merge(rows)
     return rows
 
 
@@ -259,6 +363,8 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "max_bin_ratio",
         "median_rr_ms",
         "label",
+        "enhanced_label",
+        "enhanced_reason",
     ]
     with path.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -268,15 +374,28 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def summarize(rows: list[dict[str, Any]], series: BeatSeries, window_seconds: int, step_seconds: int) -> dict[str, Any]:
     counts = {}
+    enhanced_counts = {}
     for row in rows:
         label = str(row["label"])
+        enhanced_label = str(row.get("enhanced_label", "non_af"))
         counts[label] = counts.get(label, 0) + 1
+        enhanced_counts[enhanced_label] = enhanced_counts.get(enhanced_label, 0) + 1
+    enhanced_segments = apply_enhanced_af_merge([dict(row) for row in rows])
     return {
         "source_csv": str(series.source_csv),
         "window_seconds": window_seconds,
         "step_seconds": step_seconds,
         "window_count": len(rows),
         "label_counts": counts,
+        "enhanced_label_counts": enhanced_counts,
+        "enhanced_segment_count": len(enhanced_segments),
+        "enhanced_segments": enhanced_segments,
+        "strong_possible_merge": {
+            "possible_attach_gap_ms": AF_POSSIBLE_ATTACH_GAP_MS,
+            "bridge_gap_ms": AF_BRIDGE_GAP_MS,
+            "final_min_duration_ms": AF_FINAL_MIN_DURATION_MS,
+            "min_strong_windows_per_event": AF_MIN_STRONG_WINDOWS_PER_EVENT,
+        },
     }
 
 
@@ -305,15 +424,17 @@ def main() -> None:
 
     write_csv(out_csv, rows)
     out_json.parent.mkdir(parents=True, exist_ok=True)
+    summary = summarize(rows, series, args.window_seconds, args.step_seconds)
     out_json.write_text(
-        json.dumps(summarize(rows, series, args.window_seconds, args.step_seconds), ensure_ascii=False, indent=2),
+        json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
-    label_counts = summarize(rows, series, args.window_seconds, args.step_seconds)["label_counts"]
     print(f"CSV: {csv_path}")
     print(f"Windows: {len(rows)}")
-    print(f"Label counts: {label_counts}")
+    print(f"Label counts: {summary['label_counts']}")
+    print(f"Enhanced label counts: {summary['enhanced_label_counts']}")
+    print(f"Enhanced segments: {summary['enhanced_segment_count']}")
     print(f"Output CSV: {out_csv}")
     print(f"Summary JSON: {out_json}")
 
