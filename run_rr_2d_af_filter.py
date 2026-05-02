@@ -18,6 +18,8 @@ RR_MAX = 1.8
 BIN_WIDTH = 0.05
 AF_OCCUPIED_THRESHOLD = 0.06
 AF_MAX_BIN_THRESHOLD = 0.20
+AF_POSSIBLE_OCCUPIED_THRESHOLD = 0.045
+AF_POSSIBLE_MAX_BIN_THRESHOLD = 0.25
 ECTOPY_OCCUPIED_THRESHOLD = 0.04
 ECTOPY_MAX_BIN_THRESHOLD = 0.30
 
@@ -199,7 +201,9 @@ def evaluate_rr_2d_filter(rr_ms: np.ndarray | list[int] | list[float]) -> dict[s
     )
 
     if occupied_ratio > AF_OCCUPIED_THRESHOLD and max_bin_ratio < AF_MAX_BIN_THRESHOLD:
-        result["label"] = "af"
+        result["label"] = "strong_af"
+    elif occupied_ratio > AF_POSSIBLE_OCCUPIED_THRESHOLD and max_bin_ratio < AF_POSSIBLE_MAX_BIN_THRESHOLD:
+        result["label"] = "possible_af"
     elif occupied_ratio < ECTOPY_OCCUPIED_THRESHOLD or max_bin_ratio > ECTOPY_MAX_BIN_THRESHOLD:
         result["label"] = "non_af"
 

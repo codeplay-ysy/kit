@@ -16,8 +16,10 @@ from matplotlib.patches import Patch
 
 
 LABEL_COLORS = {
-    "af": "#d73027",
+    "strong_af": "#d73027",
+    "possible_af": "#fdae61",
     "non_af": "#9e9e9e",
+    "af": "#d73027",
 }
 
 
