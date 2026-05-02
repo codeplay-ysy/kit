@@ -1,0 +1,31 @@
+{
+  "input": {
+    "edf_path": "D:\\kit\\H180418153RNZ_陆杏珠.edf",
+    "merged_csv_path": "D:\\kit\\out\\陆杏珠\\merged\\merged_rpeaks_by_quality_window_v5_priority_陆杏珠.csv",
+    "af_events_json_path": "D:\\kit\\out\\陆杏珠\\af_global_from_merged\\af_global_events.json"
+  },
+  "beat_count": 58888,
+  "af_event_count": 162,
+  "af_labeled_beat_count": 9026,
+  "symbol_counts": {
+    "N": 34111,
+    "Se": 13008,
+    "S": 2717,
+    "AF": 9026,
+    "U": 16,
+    "V": 7,
+    "Ve": 3
+  },
+  "rr_state_counts": {
+    "normal": 38977,
+    "escape": 16711,
+    "early": 3200
+  },
+  "raw_rr_state_counts": {
+    "normal": 38096,
+    "escape": 16759,
+    "early": 4033
+  },
+  "suppressed_count": 3200,
+  "eligible_template_beats": 19621
+}

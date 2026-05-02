@@ -1,0 +1,18 @@
+{
+  "edf_path": "D:\\kit\\H22121236KS6I.edf",
+  "lead": "ECG_CH3",
+  "start_time": "2022-12-12 15:34:13",
+  "duration_s": 78618.0,
+  "sampling_rate_hz": 200.0,
+  "chunk_seconds": 300,
+  "overlap_seconds": 2,
+  "method": "neurokit",
+  "correct_artifacts": false,
+  "rpeak_count": 92940,
+  "mean_hr_bpm": 70.93,
+  "rr_mean_ms": 845.674,
+  "rr_median_ms": 825.0,
+  "rr_min_ms": 305.0,
+  "rr_max_ms": 2075.0,
+  "error_chunk_count": 0
+}

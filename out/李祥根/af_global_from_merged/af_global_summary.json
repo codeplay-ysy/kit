@@ -1,0 +1,9 @@
+{
+  "edf": "H1804123TDW0J_李祥根.edf",
+  "csv": "out\\李祥根\\merged\\merged_rpeaks_by_quality_window_v5_priority_李祥根.csv",
+  "ignore_sqi": true,
+  "event_count": 177,
+  "positive_window_count": 6916,
+  "events_json": "out\\李祥根\\af_global_from_merged\\af_global_events.json",
+  "positive_windows_csv": "out\\李祥根\\af_global_from_merged\\af_global_positive_windows.csv"
+}

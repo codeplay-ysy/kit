@@ -1,0 +1,18 @@
+{
+  "edf_path": "D:\\kit\\H180412210RGT_周大宝.edf",
+  "lead": "ECG_CH1",
+  "start_time": "2018-04-12 17:52:42",
+  "duration_s": 56412.0,
+  "sampling_rate_hz": 200.0,
+  "chunk_seconds": 300,
+  "overlap_seconds": 2,
+  "method": "neurokit",
+  "correct_artifacts": false,
+  "rpeak_count": 98695,
+  "mean_hr_bpm": 104.972,
+  "rr_mean_ms": 571.572,
+  "rr_median_ms": 565.0,
+  "rr_min_ms": 320.0,
+  "rr_max_ms": 2215.0,
+  "error_chunk_count": 0
+}

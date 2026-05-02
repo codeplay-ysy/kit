@@ -1,0 +1,10 @@
+{
+  "source_csv": "D:\\kit\\out\\李祥根\\merged\\merged_rpeaks_by_quality_window_v5_priority_李祥根.csv",
+  "window_seconds": 30,
+  "step_seconds": 5,
+  "window_count": 10614,
+  "label_counts": {
+    "af": 622,
+    "non_af": 9992
+  }
+}

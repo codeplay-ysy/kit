@@ -1,0 +1,30 @@
+{
+  "input": {
+    "edf_path": "D:\\kit\\H180412210RGT_周大宝.edf",
+    "merged_csv_path": "D:\\kit\\out\\周大宝\\merged\\merged_rpeaks_by_quality_window_v5_priority_周大宝.csv",
+    "af_events_json_path": ""
+  },
+  "beat_count": 85050,
+  "af_event_count": 0,
+  "af_labeled_beat_count": 0,
+  "symbol_counts": {
+    "N": 52359,
+    "Se": 27392,
+    "S": 4525,
+    "U": 610,
+    "Ve": 134,
+    "V": 30
+  },
+  "rr_state_counts": {
+    "normal": 52359,
+    "escape": 28039,
+    "early": 4652
+  },
+  "raw_rr_state_counts": {
+    "normal": 50861,
+    "escape": 28173,
+    "early": 6016
+  },
+  "suppressed_count": 4652,
+  "eligible_template_beats": 19692
+}

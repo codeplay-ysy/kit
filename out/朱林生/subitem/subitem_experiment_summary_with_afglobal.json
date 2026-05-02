@@ -1,0 +1,31 @@
+{
+  "input": {
+    "edf_path": "D:\\kit\\H1803291HDFUG_朱林生.edf",
+    "merged_csv_path": "D:\\kit\\out\\朱林生\\merged\\merged_rpeaks_by_quality_window_v5_priority_朱林生.csv",
+    "af_events_json_path": "D:\\kit\\out\\朱林生\\af_global_from_merged\\af_global_events.json"
+  },
+  "beat_count": 62673,
+  "af_event_count": 111,
+  "af_labeled_beat_count": 44231,
+  "symbol_counts": {
+    "AF": 44231,
+    "N": 15432,
+    "Se": 963,
+    "S": 1195,
+    "U": 807,
+    "V": 28,
+    "Ve": 17
+  },
+  "rr_state_counts": {
+    "normal": 45664,
+    "early": 11734,
+    "escape": 5275
+  },
+  "raw_rr_state_counts": {
+    "normal": 44352,
+    "early": 12984,
+    "escape": 5337
+  },
+  "suppressed_count": 11734,
+  "eligible_template_beats": 18827
+}

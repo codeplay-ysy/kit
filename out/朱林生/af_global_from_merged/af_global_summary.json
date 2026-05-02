@@ -1,0 +1,9 @@
+{
+  "edf": "H1803291HDFUG_朱林生.edf",
+  "csv": "out\\朱林生\\merged\\merged_rpeaks_by_quality_window_v5_priority_朱林生.csv",
+  "ignore_sqi": true,
+  "event_count": 111,
+  "positive_window_count": 6759,
+  "events_json": "out\\朱林生\\af_global_from_merged\\af_global_events.json",
+  "positive_windows_csv": "out\\朱林生\\af_global_from_merged\\af_global_positive_windows.csv"
+}

@@ -1,0 +1,9 @@
+{
+  "edf": "H18041325CKQO_张祥珍.edf",
+  "csv": "out\\张祥珍\\merged\\merged_rpeaks_by_quality_window_v5_priority_张祥珍.csv",
+  "ignore_sqi": true,
+  "event_count": 100,
+  "positive_window_count": 8175,
+  "events_json": "out\\张祥珍\\af_global_from_merged\\af_global_events.json",
+  "positive_windows_csv": "out\\张祥珍\\af_global_from_merged\\af_global_positive_windows.csv"
+}

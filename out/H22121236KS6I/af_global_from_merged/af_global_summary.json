@@ -1,0 +1,9 @@
+{
+  "edf": "H22121236KS6I.edf",
+  "csv": "out\\H22121236KS6I\\merged\\merged_rpeaks_by_quality_window_v5_priority_H22121236KS6I.csv",
+  "ignore_sqi": true,
+  "event_count": 254,
+  "positive_window_count": 3344,
+  "events_json": "out\\H22121236KS6I\\af_global_from_merged\\af_global_events.json",
+  "positive_windows_csv": "out\\H22121236KS6I\\af_global_from_merged\\af_global_positive_windows.csv"
+}

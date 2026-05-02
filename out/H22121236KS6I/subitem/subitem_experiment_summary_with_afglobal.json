@@ -1,0 +1,31 @@
+{
+  "input": {
+    "edf_path": "D:\\kit\\H22121236KS6I.edf",
+    "merged_csv_path": "D:\\kit\\out\\H22121236KS6I\\merged\\merged_rpeaks_by_quality_window_v5_priority_H22121236KS6I.csv",
+    "af_events_json_path": "D:\\kit\\out\\H22121236KS6I\\af_global_from_merged\\af_global_events.json"
+  },
+  "beat_count": 90861,
+  "af_event_count": 254,
+  "af_labeled_beat_count": 33359,
+  "symbol_counts": {
+    "N": 25519,
+    "U": 616,
+    "S": 147,
+    "Se": 30298,
+    "Ve": 916,
+    "AF": 33359,
+    "V": 6
+  },
+  "rr_state_counts": {
+    "normal": 35249,
+    "early": 1094,
+    "escape": 54518
+  },
+  "raw_rr_state_counts": {
+    "normal": 34920,
+    "early": 1303,
+    "escape": 54638
+  },
+  "suppressed_count": 1094,
+  "eligible_template_beats": 26835
+}

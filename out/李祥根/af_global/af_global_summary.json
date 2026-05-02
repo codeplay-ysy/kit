@@ -1,0 +1,9 @@
+{
+  "edf": "H1804123TDW0J_李祥根.edf",
+  "csv": "H1804123TDW0J_李祥根.csv",
+  "ignore_sqi": true,
+  "event_count": 152,
+  "positive_window_count": 3466,
+  "events_json": "out\\李祥根\\af_global\\af_global_events.json",
+  "positive_windows_csv": "out\\李祥根\\af_global\\af_global_positive_windows.csv"
+}

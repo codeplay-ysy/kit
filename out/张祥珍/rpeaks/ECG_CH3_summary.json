@@ -1,0 +1,18 @@
+{
+  "edf_path": "D:\\kit\\H18041325CKQO_张祥珍.edf",
+  "lead": "ECG_CH3",
+  "start_time": "2018-04-13 18:42:28",
+  "duration_s": 54580.0,
+  "sampling_rate_hz": 200.0,
+  "chunk_seconds": 300,
+  "overlap_seconds": 2,
+  "method": "neurokit",
+  "correct_artifacts": false,
+  "rpeak_count": 71770,
+  "mean_hr_bpm": 78.897,
+  "rr_mean_ms": 755.446,
+  "rr_median_ms": 695.0,
+  "rr_min_ms": 305.0,
+  "rr_max_ms": 53875.0,
+  "error_chunk_count": 0
+}

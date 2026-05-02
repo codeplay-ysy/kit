@@ -1,0 +1,31 @@
+{
+  "input": {
+    "edf_path": "D:\\kit\\H18041325CKQO_张祥珍.edf",
+    "merged_csv_path": "D:\\kit\\out\\张祥珍\\merged\\merged_rpeaks_by_quality_window_v5_priority_张祥珍.csv",
+    "af_events_json_path": "D:\\kit\\out\\张祥珍\\af_global_from_merged\\af_global_events.json"
+  },
+  "beat_count": 68099,
+  "af_event_count": 100,
+  "af_labeled_beat_count": 64871,
+  "symbol_counts": {
+    "AF": 64871,
+    "N": 2108,
+    "Se": 656,
+    "Ve": 79,
+    "S": 139,
+    "V": 14,
+    "U": 232
+  },
+  "rr_state_counts": {
+    "normal": 38318,
+    "escape": 26093,
+    "early": 3688
+  },
+  "raw_rr_state_counts": {
+    "normal": 36993,
+    "escape": 26394,
+    "early": 4712
+  },
+  "suppressed_count": 3688,
+  "eligible_template_beats": 13206
+}

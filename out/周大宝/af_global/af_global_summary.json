@@ -1,0 +1,9 @@
+{
+  "edf": "H180412210RGT_周大宝.edf",
+  "csv": "H180412210RGT_周大宝.csv",
+  "ignore_sqi": true,
+  "event_count": 290,
+  "positive_window_count": 4228,
+  "events_json": "out\\周大宝\\af_global\\af_global_events.json",
+  "positive_windows_csv": "out\\周大宝\\af_global\\af_global_positive_windows.csv"
+}

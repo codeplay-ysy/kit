@@ -1,0 +1,32 @@
+{
+  "quality_score_mapping": {
+    "Excellent": 2,
+    "Barely acceptable": 1,
+    "Unacceptable": 0
+  },
+  "window_seconds": 15,
+  "v5_lead": "ECG_CH1",
+  "v1_lead": "ECG_CH3",
+  "total_windows": 3507,
+  "valid_windows": 3492,
+  "invalid_windows": 15,
+  "selected_window_counts": {
+    "ECG_CH1": 406,
+    "ECG_CH3": 3086
+  },
+  "selected_peak_counts": {
+    "ECG_CH1": 7200,
+    "ECG_CH3": 51688,
+    "total": 58888
+  },
+  "discarded_peak_counts": {
+    "ECG_CH1": 52136,
+    "ECG_CH3": 7226,
+    "total": 59362
+  },
+  "tail_no_quality_peak_counts": {
+    "ECG_CH1": 7,
+    "ECG_CH3": 0,
+    "total": 7
+  }
+}

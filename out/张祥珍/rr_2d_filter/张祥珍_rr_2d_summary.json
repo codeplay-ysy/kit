@@ -1,0 +1,10 @@
+{
+  "source_csv": "D:\\kit\\out\\张祥珍\\merged\\merged_rpeaks_by_quality_window_v5_priority_张祥珍.csv",
+  "window_seconds": 30,
+  "step_seconds": 5,
+  "window_count": 10914,
+  "label_counts": {
+    "non_af": 10722,
+    "af": 192
+  }
+}
