@@ -399,11 +399,57 @@ def summarize(rows: list[dict[str, Any]], series: BeatSeries, window_seconds: in
     }
 
 
+def format_hms(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def enhanced_segments_to_events(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for index, segment in enumerate(segments, start=1):
+        start_ms = int(segment["start_ms"])
+        end_ms = int(segment["end_ms"])
+        duration_ms = max(0, end_ms - start_ms)
+        events.append(
+            {
+                "type": "af_family",
+                "subtype": "fibrillation",
+                "layer": "rr_2d_filter",
+                "rule": "rr_2d_strong_possible_merge",
+                "event_index": index,
+                "t0_ms": start_ms,
+                "t1_ms": end_ms,
+                "time": f"{start_ms} ms ~ {end_ms} ms",
+                "duration": format_hms(duration_ms / 1000.0),
+                "stats": {
+                    "window_count": int(segment["window_count"]),
+                    "strong_windows": int(segment["strong_windows"]),
+                    "possible_windows": int(segment["possible_windows"]),
+                    "possible_attach_gap_ms": AF_POSSIBLE_ATTACH_GAP_MS,
+                    "bridge_gap_ms": AF_BRIDGE_GAP_MS,
+                    "final_min_duration_ms": AF_FINAL_MIN_DURATION_MS,
+                    "min_strong_windows_per_event": AF_MIN_STRONG_WINDOWS_PER_EVENT,
+                },
+            }
+        )
+    return events
+
+
+def write_events_json(path: Path, segments: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    events = enhanced_segments_to_events(segments)
+    path.write_text(json.dumps(events, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="2D RR bin filter for AF candidate screening.")
     parser.add_argument("--csv", required=True, help="Beat CSV with time offsets and RR intervals.")
     parser.add_argument("--out-csv", default="", help="Output CSV path. Default: out/rr_2d_filter/<stem>_rr_2d_windows.csv")
     parser.add_argument("--out-json", default="", help="Output JSON summary path.")
+    parser.add_argument("--out-events-json", default="", help="Output enhanced AF events JSON path.")
     parser.add_argument("--window-seconds", type=int, default=WINDOW_SECONDS, help="Sliding window size in seconds.")
     parser.add_argument("--step-seconds", type=int, default=STEP_SECONDS, help="Sliding step in seconds.")
     return parser.parse_args()
@@ -421,14 +467,17 @@ def main() -> None:
     out_root = Path("out") / "rr_2d_filter"
     out_csv = Path(args.out_csv).resolve() if args.out_csv else out_root / f"{csv_path.stem}_rr_2d_windows.csv"
     out_json = Path(args.out_json).resolve() if args.out_json else out_root / f"{csv_path.stem}_rr_2d_summary.json"
+    out_events_json = Path(args.out_events_json).resolve() if args.out_events_json else out_root / f"{csv_path.stem}_rr_2d_events.json"
 
     write_csv(out_csv, rows)
     out_json.parent.mkdir(parents=True, exist_ok=True)
     summary = summarize(rows, series, args.window_seconds, args.step_seconds)
+    enhanced_segments = summary["enhanced_segments"]
     out_json.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    write_events_json(out_events_json, enhanced_segments)
 
     print(f"CSV: {csv_path}")
     print(f"Windows: {len(rows)}")
@@ -437,6 +486,7 @@ def main() -> None:
     print(f"Enhanced segments: {summary['enhanced_segment_count']}")
     print(f"Output CSV: {out_csv}")
     print(f"Summary JSON: {out_json}")
+    print(f"Events JSON: {out_events_json}")
 
 
 if __name__ == "__main__":
