@@ -15,7 +15,11 @@ import matplotlib.pyplot as plt
 
 NO_PRED = "__NO_PRED__"
 NO_TRUE = "__NO_TRUE__"
-DEFAULT_LABEL_ORDER = ["N", "AF", "Af", "S", "Se", "V", "Ve"]
+DEFAULT_LABEL_ORDER = ["N", "AF", "S", "Se", "V", "Ve"]
+LABEL_ALIASES = {
+    "Af": "AF",
+    "af": "AF",
+}
 
 
 @dataclass(slots=True)
@@ -45,7 +49,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def _clean_label(value: str) -> str:
-    return value.strip() or "<EMPTY>"
+    label = value.strip() or "<EMPTY>"
+    return LABEL_ALIASES.get(label, label)
 
 
 def load_truth(path: str | Path) -> list[Beat]:

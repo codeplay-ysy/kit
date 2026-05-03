@@ -19,6 +19,8 @@ LABEL_COLORS = {
     "strong_af": "#d73027",
     "possible_af": "#fdae61",
     "enhanced_af": "#7b3294",
+    "mid_af": "#1b9e77",
+    "long_af": "#2166ac",
     "non_af": "#9e9e9e",
     "af": "#d73027",
 }
@@ -31,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-figure", required=True, help="Output figure path, e.g. .pdf or .png.")
     parser.add_argument(
         "--label-column",
-        choices=["label", "enhanced_label"],
+        choices=["label", "enhanced_label", "mid_label", "long_label", "final_label"],
         default="enhanced_label",
         help="Window label column to plot. Defaults to enhanced_label when present.",
     )
