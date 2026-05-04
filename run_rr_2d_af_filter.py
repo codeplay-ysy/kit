@@ -18,8 +18,8 @@ RR_MAX = 1.8
 BIN_WIDTH = 0.05
 AF_OCCUPIED_THRESHOLD = 0.06
 AF_MAX_BIN_THRESHOLD = 0.20
-AF_POSSIBLE_OCCUPIED_THRESHOLD = 0.045
-AF_POSSIBLE_MAX_BIN_THRESHOLD = 0.25
+AF_POSSIBLE_OCCUPIED_THRESHOLD = 0.042
+AF_POSSIBLE_MAX_BIN_THRESHOLD = 0.26
 AF_POSSIBLE_ATTACH_GAP_MS = 30_000
 AF_BRIDGE_GAP_MS = 30_000
 AF_FINAL_MIN_DURATION_MS = 30_000
@@ -39,12 +39,17 @@ LONG_POSSIBLE_OCCUPIED_THRESHOLD = 0.35
 LONG_STRONG_OCCUPIED_THRESHOLD = 0.50
 LONG_POSSIBLE_MAX_BIN_THRESHOLD = 0.025
 LONG_STRONG_MAX_BIN_THRESHOLD = 0.0125
-LONG_AF_CONFIDENCE_THRESHOLD = 0.50
+LONG_AF_CONFIDENCE_THRESHOLD = 0.65
 
 MULTISCALE_BASE_BRIDGE_GAP_MS = 30_000
 MULTISCALE_MAX_BRIDGE_GAP_MS = 300_000
-MULTISCALE_MIN_BRIDGE_CONFIDENCE = 0.40
-MULTISCALE_MIN_BRIDGE_COVERAGE = 0.50
+MULTISCALE_MIN_BRIDGE_CONFIDENCE = 0.45
+MULTISCALE_MIN_BRIDGE_COVERAGE = 0.60
+MULTISCALE_LONG_HIGH_CONFIDENCE = 0.70
+MULTISCALE_LONG_MID_CONFIDENCE = 0.50
+MULTISCALE_LONG_HIGH_GAP_FACTOR = 1.00
+MULTISCALE_LONG_MID_GAP_FACTOR = 0.60
+MULTISCALE_LONG_LOW_GAP_FACTOR = 0.30
 MULTISCALE_FINAL_MIN_DURATION_MS = 30_000
 MULTISCALE_FINAL_MIN_CANDIDATE_WINDOWS = 2
 
@@ -365,16 +370,23 @@ def apply_multiscale_af_merge(
     for row in ordered[1:]:
         current = segments[-1]
         gap_ms = max(0, int(row["start_ms"]) - int(current["end_ms"]))
-        gap_stats = _gap_mid_confidence_stats(rows, int(current["end_ms"]), int(row["start_ms"]), MID_AF_CONFIDENCE_THRESHOLD)
+        gap_stats = _gap_context_confidence_stats(
+            rows,
+            int(current["end_ms"]),
+            int(row["start_ms"]),
+            mid_threshold=MID_AF_CONFIDENCE_THRESHOLD,
+            long_threshold=LONG_AF_CONFIDENCE_THRESHOLD,
+        )
         allowed_gap_ms = _dynamic_bridge_gap_ms(
-            gap_stats["mean_confidence"],
+            mid_confidence=gap_stats["mid_mean_confidence"],
+            long_confidence=gap_stats["long_mean_confidence"],
             base_bridge_gap_ms=base_bridge_gap_ms,
             max_bridge_gap_ms=max_bridge_gap_ms,
         )
         can_bridge = gap_ms <= base_bridge_gap_ms or (
             gap_ms <= allowed_gap_ms
-            and gap_stats["mean_confidence"] >= min_bridge_confidence
-            and gap_stats["coverage"] >= min_bridge_coverage
+            and gap_stats["mid_mean_confidence"] >= min_bridge_confidence
+            and gap_stats["mid_coverage"] >= min_bridge_coverage
         )
         if can_bridge:
             _extend_multiscale_segment(current, row, gap_ms, gap_stats, allowed_gap_ms)
@@ -442,35 +454,48 @@ def _extend_multiscale_segment(
         segment["bridged_gap_count"] = int(segment["bridged_gap_count"]) + 1
         segment["max_bridged_gap_ms"] = max(int(segment["max_bridged_gap_ms"]), gap_ms)
         segment["max_allowed_gap_ms"] = max(int(segment["max_allowed_gap_ms"]), allowed_gap_ms)
-        segment["bridge_mean_confidence_sum"] = float(segment["bridge_mean_confidence_sum"]) + gap_stats["mean_confidence"]
-        segment["bridge_coverage_sum"] = float(segment["bridge_coverage_sum"]) + gap_stats["coverage"]
+        segment["bridge_mean_confidence_sum"] = float(segment["bridge_mean_confidence_sum"]) + gap_stats["mid_mean_confidence"]
+        segment["bridge_coverage_sum"] = float(segment["bridge_coverage_sum"]) + gap_stats["mid_coverage"]
 
 
-def _gap_mid_confidence_stats(
+def _gap_context_confidence_stats(
     rows: list[dict[str, Any]],
     gap_start_ms: int,
     gap_end_ms: int,
-    threshold: float,
+    mid_threshold: float,
+    long_threshold: float,
 ) -> dict[str, float]:
     if gap_end_ms <= gap_start_ms:
-        return {"mean_confidence": 1.0, "coverage": 1.0}
+        return {"mid_mean_confidence": 1.0, "mid_coverage": 1.0, "long_mean_confidence": 1.0, "long_coverage": 1.0}
     gap_rows = [
         row
         for row in rows
         if int(row["start_ms"]) < gap_end_ms and int(row["end_ms"]) > gap_start_ms
     ]
     if not gap_rows:
-        return {"mean_confidence": 0.0, "coverage": 0.0}
-    confidences = [float(row.get("mid_confidence", 0.0)) for row in gap_rows]
+        return {"mid_mean_confidence": 0.0, "mid_coverage": 0.0, "long_mean_confidence": 0.0, "long_coverage": 0.0}
+    mid_confidences = [float(row.get("mid_confidence", 0.0)) for row in gap_rows]
+    long_confidences = [float(row.get("long_confidence", 0.0)) for row in gap_rows]
     return {
-        "mean_confidence": float(np.mean(confidences)),
-        "coverage": float(sum(confidence >= threshold for confidence in confidences) / len(confidences)),
+        "mid_mean_confidence": float(np.mean(mid_confidences)),
+        "mid_coverage": float(sum(confidence >= mid_threshold for confidence in mid_confidences) / len(mid_confidences)),
+        "long_mean_confidence": float(np.mean(long_confidences)),
+        "long_coverage": float(sum(confidence >= long_threshold for confidence in long_confidences) / len(long_confidences)),
     }
 
 
-def _dynamic_bridge_gap_ms(mid_confidence: float, base_bridge_gap_ms: int, max_bridge_gap_ms: int) -> int:
-    confidence = _clamp(mid_confidence)
-    return int(round(base_bridge_gap_ms + confidence * (max_bridge_gap_ms - base_bridge_gap_ms)))
+def _long_gap_factor(long_confidence: float) -> float:
+    if long_confidence >= MULTISCALE_LONG_HIGH_CONFIDENCE:
+        return MULTISCALE_LONG_HIGH_GAP_FACTOR
+    if long_confidence >= MULTISCALE_LONG_MID_CONFIDENCE:
+        return MULTISCALE_LONG_MID_GAP_FACTOR
+    return MULTISCALE_LONG_LOW_GAP_FACTOR
+
+
+def _dynamic_bridge_gap_ms(mid_confidence: float, long_confidence: float, base_bridge_gap_ms: int, max_bridge_gap_ms: int) -> int:
+    mid_gap_ms = base_bridge_gap_ms + _clamp(mid_confidence) * (max_bridge_gap_ms - base_bridge_gap_ms)
+    long_factor = _long_gap_factor(long_confidence)
+    return int(round(base_bridge_gap_ms + long_factor * (mid_gap_ms - base_bridge_gap_ms)))
 
 
 def _keep_multiscale_segment(
@@ -767,6 +792,11 @@ def multiscale_config() -> dict[str, Any]:
         "max_bridge_gap_ms": MULTISCALE_MAX_BRIDGE_GAP_MS,
         "min_bridge_confidence": MULTISCALE_MIN_BRIDGE_CONFIDENCE,
         "min_bridge_coverage": MULTISCALE_MIN_BRIDGE_COVERAGE,
+        "long_high_confidence": MULTISCALE_LONG_HIGH_CONFIDENCE,
+        "long_mid_confidence": MULTISCALE_LONG_MID_CONFIDENCE,
+        "long_high_gap_factor": MULTISCALE_LONG_HIGH_GAP_FACTOR,
+        "long_mid_gap_factor": MULTISCALE_LONG_MID_GAP_FACTOR,
+        "long_low_gap_factor": MULTISCALE_LONG_LOW_GAP_FACTOR,
         "final_min_duration_ms": MULTISCALE_FINAL_MIN_DURATION_MS,
         "final_min_candidate_windows": MULTISCALE_FINAL_MIN_CANDIDATE_WINDOWS,
     }
