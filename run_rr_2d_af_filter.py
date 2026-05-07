@@ -50,6 +50,8 @@ MULTISCALE_LONG_MID_CONFIDENCE = 0.50
 MULTISCALE_LONG_HIGH_GAP_FACTOR = 1.00
 MULTISCALE_LONG_MID_GAP_FACTOR = 0.60
 MULTISCALE_LONG_LOW_GAP_FACTOR = 0.30
+MULTISCALE_LONG_REQUIRED_GAP_MS = 90_000
+MULTISCALE_LONG_REQUIRED_CONFIDENCE = 0.50
 MULTISCALE_FINAL_MIN_DURATION_MS = 30_000
 MULTISCALE_FINAL_MIN_CANDIDATE_WINDOWS = 2
 
@@ -383,8 +385,13 @@ def apply_multiscale_af_merge(
             base_bridge_gap_ms=base_bridge_gap_ms,
             max_bridge_gap_ms=max_bridge_gap_ms,
         )
+        long_gate_passed = (
+            gap_ms <= MULTISCALE_LONG_REQUIRED_GAP_MS
+            or gap_stats["long_mean_confidence"] >= MULTISCALE_LONG_REQUIRED_CONFIDENCE
+        )
         can_bridge = gap_ms <= base_bridge_gap_ms or (
-            gap_ms <= allowed_gap_ms
+            long_gate_passed
+            and gap_ms <= allowed_gap_ms
             and gap_stats["mid_mean_confidence"] >= min_bridge_confidence
             and gap_stats["mid_coverage"] >= min_bridge_coverage
         )
@@ -797,6 +804,8 @@ def multiscale_config() -> dict[str, Any]:
         "long_high_gap_factor": MULTISCALE_LONG_HIGH_GAP_FACTOR,
         "long_mid_gap_factor": MULTISCALE_LONG_MID_GAP_FACTOR,
         "long_low_gap_factor": MULTISCALE_LONG_LOW_GAP_FACTOR,
+        "long_required_gap_ms": MULTISCALE_LONG_REQUIRED_GAP_MS,
+        "long_required_confidence": MULTISCALE_LONG_REQUIRED_CONFIDENCE,
         "final_min_duration_ms": MULTISCALE_FINAL_MIN_DURATION_MS,
         "final_min_candidate_windows": MULTISCALE_FINAL_MIN_CANDIDATE_WINDOWS,
     }

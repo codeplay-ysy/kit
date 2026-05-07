@@ -23,6 +23,10 @@ LABEL_COLORS = {
     "long_af": "#2166ac",
     "non_af": "#9e9e9e",
     "af": "#d73027",
+    "strong_afl": "#542788",
+    "possible_afl": "#998ec3",
+    "non_afl": "#bdbdbd",
+    "afl": "#542788",
 }
 
 
@@ -35,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         "--label-column",
         choices=["label", "enhanced_label", "mid_label", "long_label", "final_label"],
         default="enhanced_label",
-        help="Window label column to plot. Defaults to enhanced_label when present.",
+        help="Window label column to plot. Use label/final_label for AFL window outputs.",
     )
     return parser.parse_args()
 

@@ -35,7 +35,16 @@ def _time_only(timestamp: str) -> str:
     return timestamp.split(" ", 1)[1] if " " in timestamp else timestamp
 
 
-def _load_af_intervals(path: str | Path | None) -> list[tuple[float, float]]:
+@dataclass(slots=True)
+class RhythmInterval:
+    start_ms: float
+    end_ms: float
+    subtype: str
+    layer: str
+    rule: str
+
+
+def _load_af_intervals(path: str | Path | None) -> list[RhythmInterval]:
     if not path:
         return []
     events_path = Path(path)
@@ -44,27 +53,36 @@ def _load_af_intervals(path: str | Path | None) -> list[tuple[float, float]]:
     events = json.loads(events_path.read_text(encoding="utf-8"))
     if not isinstance(events, list):
         raise SystemExit(f"AF events JSON must contain a list: {events_path}")
-    intervals: list[tuple[float, float]] = []
+    intervals: list[RhythmInterval] = []
     for event in events:
         if not isinstance(event, dict) or "t0_ms" not in event or "t1_ms" not in event:
             continue
         start_ms = float(event["t0_ms"])
         end_ms = float(event["t1_ms"])
         if end_ms > start_ms:
-            intervals.append((start_ms, end_ms))
-    return sorted(intervals)
+            intervals.append(
+                RhythmInterval(
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    subtype=str(event.get("subtype") or "fibrillation"),
+                    layer=str(event.get("layer") or "unknown"),
+                    rule=str(event.get("rule") or "unknown"),
+                )
+            )
+    return sorted(intervals, key=lambda item: (item.start_ms, item.end_ms))
 
 
-def _mark_af_beats(offsets_ms: list[float], intervals: list[tuple[float, float]]) -> list[bool]:
-    af_flags = [False] * len(offsets_ms)
+def _mark_af_beats(offsets_ms: list[float], intervals: list[RhythmInterval]) -> list[RhythmInterval | None]:
+    rhythm_marks: list[RhythmInterval | None] = [None] * len(offsets_ms)
     interval_index = 0
     for beat_index, offset_ms in enumerate(offsets_ms):
-        while interval_index < len(intervals) and intervals[interval_index][1] < offset_ms:
+        while interval_index < len(intervals) and intervals[interval_index].end_ms < offset_ms:
             interval_index += 1
         if interval_index < len(intervals):
-            start_ms, end_ms = intervals[interval_index]
-            af_flags[beat_index] = start_ms <= offset_ms <= end_ms
-    return af_flags
+            interval = intervals[interval_index]
+            if interval.start_ms <= offset_ms <= interval.end_ms:
+                rhythm_marks[beat_index] = interval
+    return rhythm_marks
 
 
 @dataclass(slots=True)
@@ -345,7 +363,7 @@ def run_experiment(
     merged_rows = _load_merged_rows(merged_csv_path, reader.header.start_time)
     offsets_ms = [float(row["merged_milliseconds"]) for row in merged_rows]
     af_intervals = _load_af_intervals(af_events_json_path)
-    af_flags = _mark_af_beats(offsets_ms, af_intervals)
+    rhythm_marks = _mark_af_beats(offsets_ms, af_intervals)
     rr_prev_ms, rr_local_ms, raw_states, final_states, suppressed_flags = _compute_rr_series(offsets_ms)
 
     signals, fs_hz = _load_signals(reader)
@@ -371,9 +389,10 @@ def run_experiment(
         corr_v1 = corr_v5 = corr_avg = corr_min = None
         energy_v1 = energy_v5 = energy_ratio_v1 = energy_ratio_v5 = energy_ratio_max = None
 
-        if af_flags[index]:
+        rhythm_mark = rhythm_marks[index]
+        if rhythm_mark is not None:
             symbol = "AF"
-            note = "af_global_event"
+            note = f"af_family_{rhythm_mark.subtype}_event"
         elif final_state in {"early", "escape"}:
             context_indices = [candidate for candidate in eligible_indices if candidate < index][-CONTEXT_SIDE:]
             if len(context_indices) >= 2:
@@ -464,7 +483,11 @@ def run_experiment(
         },
         "beat_count": len(rows),
         "af_event_count": len(af_intervals),
-        "af_labeled_beat_count": int(sum(af_flags)),
+        "af_labeled_beat_count": int(sum(mark is not None for mark in rhythm_marks)),
+        "af_event_subtype_counts": {
+            subtype: sum(interval.subtype == subtype for interval in af_intervals)
+            for subtype in sorted({interval.subtype for interval in af_intervals})
+        },
         "symbol_counts": symbol_counts,
         "rr_state_counts": rr_state_counts,
         "raw_rr_state_counts": raw_rr_state_counts,
