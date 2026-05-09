@@ -14,27 +14,22 @@ AFL_STEP_SECONDS = 30
 AFL_MIN_VALID_RR = 100
 AFL_RR_MIN_MS = 300
 AFL_RR_MAX_MS = 2000
-AFL_DIFF_MIN_MS = 30
-AFL_DIFF_BIN_MS = 30
-AFL_TOP_DIFF_PEAKS = 3
+AFL_BIN_MS = 40
+AFL_TOL_MS = 50
 AFL_MAX_MULTIPLE = 4
-AFL_MULTIPLE_TOLERANCE_MS = 30
-AFL_BASE_DIFF_MIN_MS = 40
-AFL_BASE_DIFF_MAX_MS = 400
-AFL_DIFF_PEAK_COVERAGE_STRONG = 0.50
-AFL_DIFF_PEAK_COVERAGE_POSSIBLE = 0.40
-AFL_MULTIPLE_RATIO_STRONG = 0.60
-AFL_MULTIPLE_RATIO_POSSIBLE = 0.45
-AFL_MIN_NONZERO_DIFF_RATIO = 0.15
-AFL_MIN_VALID_DIFF = 20
-AFL_MEAN_HR_SUPPORT_BPM = 90.0
-AFL_STABLE_RR_DOMINANT_RATIO = 0.90
-AFL_STABLE_RR_CV = 0.05
-AFL_RR_CLUSTER_BIN_MS = 40
-AFL_POSSIBLE_ATTACH_GAP_MS = 60_000
-AFL_BRIDGE_GAP_MS = 60_000
+AFL_MIN_CLUSTER_COUNT = 8
+AFL_MIN_CLUSTER_RATIO = 0.03
+AFL_MAX_CANDIDATE_CLUSTERS = 8
+AFL_MIN_MATCHED_CLUSTERS = 2
+AFL_MIN_MATCHED_RR_RATIO = 0.60
+AFL_MIN_MINOR_COUNT = 5
+AFL_MIN_MINOR_RATIO = 0.03
+AFL_STABLE_TOP1_RATIO = 0.90
+AFL_STABLE_TOP2_RATIO = 0.05
+AFL_MIN_TRANSITION_COVERAGE = 0.45
+AFL_TRANSITION_TOP_K = 6
+AFL_EVENT_GAP_MS = 10_000
 AFL_FINAL_MIN_DURATION_MS = 60_000
-AFL_MIN_STRONG_WINDOWS_PER_EVENT = 1
 
 
 @dataclass(slots=True)
@@ -44,19 +39,18 @@ class BeatSeries:
     source_csv: Path
 
 
-def _normalize_name(name: str) -> str:
+def _norm(name: str) -> str:
     return name.strip().lower()
 
 
-def _pick_field(field_map: dict[str, str], candidates: list[str]) -> str | None:
-    for candidate in candidates:
-        key = _normalize_name(candidate)
-        if key in field_map:
-            return field_map[key]
+def _pick(fields: dict[str, str], names: list[str]) -> str | None:
+    for name in names:
+        if _norm(name) in fields:
+            return fields[_norm(name)]
     return None
 
 
-def _parse_float(text: str) -> float | None:
+def _num(text: str) -> float | None:
     value = (text or "").strip()
     if not value or value == "-":
         return None
@@ -66,8 +60,8 @@ def _parse_float(text: str) -> float | None:
         return None
 
 
-def _parse_int_like(text: str) -> int | None:
-    value = _parse_float(text)
+def _int_like(text: str) -> int | None:
+    value = _num(text)
     return None if value is None else int(round(value))
 
 
@@ -76,9 +70,9 @@ def load_beat_series(csv_path: Path) -> BeatSeries:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
             raise ValueError(f"CSV has no header: {csv_path}")
-        field_map = {_normalize_name(name): name for name in reader.fieldnames}
-        offset_key = _pick_field(field_map, ["merged_milliseconds", "time offset(ms)", "offset_ms", "timestamp_ms", "ms"])
-        rr_key = _pick_field(field_map, ["rr interval(ms)", "rr_ms", "rr", "rr_raw"])
+        fields = {_norm(name): name for name in reader.fieldnames}
+        offset_key = _pick(fields, ["merged_milliseconds", "time offset(ms)", "offset_ms", "timestamp_ms", "ms"])
+        rr_key = _pick(fields, ["rr interval(ms)", "rr_ms", "rr", "rr_raw"])
         if offset_key is None and rr_key is None:
             raise ValueError(f"CSV must contain a time column or RR column: {csv_path}")
         rows = list(reader)
@@ -88,24 +82,22 @@ def load_beat_series(csv_path: Path) -> BeatSeries:
     offsets: list[int] = []
     rr_values: list[int] = []
     for index, row in enumerate(rows):
-        offset_value = _parse_int_like(row[offset_key]) if offset_key else None
-        rr_value = _parse_int_like(row[rr_key]) if rr_key else None
-        if offset_value is None:
-            if index == 0:
-                offset_value = 0
-            else:
+        offset = _int_like(row[offset_key]) if offset_key else None
+        rr = _int_like(row[rr_key]) if rr_key else None
+        if offset is None:
+            if index != 0:
                 raise ValueError(f"Missing time offset for row {index + 1} in {csv_path}")
-        offsets.append(offset_value)
-        if rr_value is None:
+            offset = 0
+        offsets.append(offset)
+        if rr is None:
             if index > 0:
-                rr_value = offsets[index] - offsets[index - 1]
-            elif len(rows) > 1:
-                next_offset = _parse_int_like(rows[index + 1].get(offset_key, "")) if offset_key else None
-                rr_value = next_offset - offset_value if next_offset is not None else 0
+                rr = offsets[index] - offsets[index - 1]
+            elif len(rows) > 1 and offset_key:
+                next_offset = _int_like(rows[index + 1].get(offset_key, ""))
+                rr = next_offset - offset if next_offset is not None else 0
             else:
-                rr_value = 0
-        rr_values.append(rr_value)
-
+                rr = 0
+        rr_values.append(rr)
     order = np.argsort(np.asarray(offsets, dtype=np.int64))
     return BeatSeries(np.asarray(offsets, dtype=np.int64)[order], np.asarray(rr_values, dtype=np.int64)[order], csv_path)
 
@@ -113,215 +105,170 @@ def load_beat_series(csv_path: Path) -> BeatSeries:
 def make_windows(duration_ms: int, window_ms: int, step_ms: int) -> list[tuple[int, int]]:
     if duration_ms <= 0:
         return []
-    last_start = max(duration_ms - window_ms, 0)
-    return [(start_ms, start_ms + window_ms) for start_ms in range(0, last_start + 1, step_ms)]
-
-
-def slice_window_rr(series: BeatSeries, start_ms: int, end_ms: int) -> np.ndarray:
-    left = int(np.searchsorted(series.offsets_ms, start_ms, side="left"))
-    right = int(np.searchsorted(series.offsets_ms, end_ms, side="left"))
-    return series.rr_ms[left:right]
+    return [(start, start + window_ms) for start in range(0, max(duration_ms - window_ms, 0) + 1, step_ms)]
 
 
 def format_hms(seconds: float) -> str:
-    total_seconds = max(0, int(round(seconds)))
-    return f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}:{total_seconds % 60:02d}"
+    total = max(0, int(round(seconds)))
+    return f"{total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d}"
 
 
-def _valid_rr(rr_ms: np.ndarray | list[int] | list[float]) -> np.ndarray:
+def valid_mask(rr_ms: np.ndarray) -> np.ndarray:
     values = np.asarray(rr_ms, dtype=np.float64)
-    return values[np.isfinite(values) & (values >= AFL_RR_MIN_MS) & (values <= AFL_RR_MAX_MS)]
+    return np.isfinite(values) & (values >= AFL_RR_MIN_MS) & (values <= AFL_RR_MAX_MS)
 
 
-def dominant_rr_ratio(rr_ms: np.ndarray) -> float:
-    if rr_ms.size == 0:
-        return 0.0
-    _, counts = np.unique(np.round(rr_ms / AFL_RR_CLUSTER_BIN_MS).astype(np.int32), return_counts=True)
-    return float(counts.max() / rr_ms.size) if counts.size else 0.0
-
-
-def diff_peak_stats(diff_ms: np.ndarray) -> dict[str, Any]:
-    if diff_ms.size == 0:
-        return {"diff_peak_count": 0, "diff_top_peak_ms": None, "diff_peak_coverage": 0.0, "diff_peak_centers_ms": [], "diff_peak_counts": []}
-    bins = np.round(diff_ms / AFL_DIFF_BIN_MS).astype(np.int32)
-    unique_bins, counts = np.unique(bins, return_counts=True)
-    order = np.argsort(counts)[::-1][:AFL_TOP_DIFF_PEAKS]
-    top_bins = unique_bins[order]
-    top_counts = counts[order]
-    centers = [float(bin_id * AFL_DIFF_BIN_MS) for bin_id in top_bins.tolist()]
-    return {
-        "diff_peak_count": int(top_counts.size),
-        "diff_top_peak_ms": centers[0] if centers else None,
-        "diff_peak_coverage": float(np.sum(top_counts) / max(diff_ms.size, 1)),
-        "diff_peak_centers_ms": centers,
-        "diff_peak_counts": [int(count) for count in top_counts.tolist()],
-    }
-
-
-def multiple_match_count(diff_ms: np.ndarray, base_diff_ms: float) -> int:
-    hits = 0
-    for value in diff_ms:
-        if any(abs(float(value) - multiple * base_diff_ms) <= AFL_MULTIPLE_TOLERANCE_MS for multiple in range(1, AFL_MAX_MULTIPLE + 1)):
-            hits += 1
-    return hits
-
-
-def best_multiple_match(diff_ms: np.ndarray, candidates: list[float]) -> tuple[float | None, int, float]:
-    best_base: float | None = None
-    best_count = 0
-    for base_diff_ms in candidates:
-        if AFL_BASE_DIFF_MIN_MS <= base_diff_ms <= AFL_BASE_DIFF_MAX_MS:
-            count = multiple_match_count(diff_ms, base_diff_ms)
-            if count > best_count:
-                best_base = float(base_diff_ms)
-                best_count = count
-    return best_base, best_count, float(best_count / max(diff_ms.size, 1)) if diff_ms.size else 0.0
-
-
-def evaluate_afl_window(rr_ms: np.ndarray | list[int] | list[float]) -> dict[str, Any]:
-    rr = _valid_rr(rr_ms)
-    result: dict[str, Any] = {
-        "label": "non_afl", "reason": "not_evaluated", "valid_rr_count": int(rr.size), "raw_diff_count": 0,
-        "valid_diff_count": 0, "nonzero_diff_ratio": 0.0, "mean_rr_ms": None, "mean_hr": 0.0,
-        "rr_cv": 0.0, "dominant_rr_ratio": 0.0, "base_diff_ms": None, "matched_diff_count": 0,
-        "multiple_match_ratio": 0.0, "diff_peak_count": 0, "diff_top_peak_ms": None,
-        "diff_peak_coverage": 0.0, "diff_peak_centers_ms": [], "diff_peak_counts": [], "afl_score": 0.0,
-    }
-    if rr.size < AFL_MIN_VALID_RR:
-        result["reason"] = "insufficient_rr"
-        return result
-
-    mean_rr = float(np.mean(rr))
-    rr_cv = float(np.std(rr) / mean_rr) if mean_rr > 0 else 0.0
-    raw_diff = np.abs(np.diff(rr))
-    valid_diff = raw_diff[raw_diff >= AFL_DIFF_MIN_MS]
-    nonzero_ratio = float(valid_diff.size / max(raw_diff.size, 1)) if raw_diff.size else 0.0
-    dom_ratio = dominant_rr_ratio(rr)
-    result.update({"raw_diff_count": int(raw_diff.size), "valid_diff_count": int(valid_diff.size), "nonzero_diff_ratio": round(nonzero_ratio, 6), "mean_rr_ms": round(mean_rr, 3), "mean_hr": round(60000.0 / mean_rr, 3) if mean_rr > 0 else 0.0, "rr_cv": round(rr_cv, 6), "dominant_rr_ratio": round(dom_ratio, 6)})
-    if valid_diff.size < AFL_MIN_VALID_DIFF:
-        result["reason"] = "insufficient_nonzero_diff"
-        return result
-
-    peaks = diff_peak_stats(valid_diff)
-    base_diff, match_count, match_ratio = best_multiple_match(valid_diff, [float(item) for item in peaks["diff_peak_centers_ms"]])
-    score = 0.0
-    reasons: list[str] = []
-    peak_coverage = float(peaks["diff_peak_coverage"])
-    if peak_coverage >= AFL_DIFF_PEAK_COVERAGE_STRONG:
-        score += 1.0; reasons.append("strong_diff_peak_coverage")
-    elif peak_coverage >= AFL_DIFF_PEAK_COVERAGE_POSSIBLE:
-        score += 0.5; reasons.append("possible_diff_peak_coverage")
-    if match_ratio >= AFL_MULTIPLE_RATIO_STRONG:
-        score += 1.0; reasons.append("strong_multiple_match")
-    elif match_ratio >= AFL_MULTIPLE_RATIO_POSSIBLE:
-        score += 0.5; reasons.append("possible_multiple_match")
-    if base_diff is not None:
-        score += 1.0; reasons.append("base_diff_in_range")
-    if nonzero_ratio >= AFL_MIN_NONZERO_DIFF_RATIO:
-        score += 1.0; reasons.append("enough_nonzero_diff")
-    if float(result["mean_hr"]) >= AFL_MEAN_HR_SUPPORT_BPM:
-        score += 0.5; reasons.append("heart_rate_support")
-    stable_rr = dom_ratio > AFL_STABLE_RR_DOMINANT_RATIO and rr_cv < AFL_STABLE_RR_CV
-    if stable_rr:
-        score -= 1.0; reasons.append("stable_rr_penalty")
-    label = "strong_afl" if (not stable_rr and score >= 3.0) else "possible_afl" if (not stable_rr and score >= 2.0) else "non_afl"
-    result.update({**peaks, "base_diff_ms": None if base_diff is None else round(base_diff, 3), "matched_diff_count": int(match_count), "multiple_match_ratio": round(match_ratio, 6), "afl_score": round(score, 3), "label": label, "reason": ";".join(reasons) if reasons else "criteria_not_met"})
-    return result
-
-def classify_series(series: BeatSeries, window_seconds: int, step_seconds: int) -> list[dict[str, Any]]:
-    window_ms = window_seconds * 1000
-    step_ms = step_seconds * 1000
-    duration_ms = int(series.offsets_ms[-1]) + window_ms if series.offsets_ms.size else 0
-    rows: list[dict[str, Any]] = []
-    for window_index, (start_ms, end_ms) in enumerate(make_windows(duration_ms, window_ms, step_ms)):
-        rows.append({"window_index": window_index, "start_ms": start_ms, "end_ms": end_ms, "duration_seconds": window_seconds, **evaluate_afl_window(slice_window_rr(series, start_ms, end_ms)), "candidate_afl": False, "candidate_reason": "not_evaluated", "final_label": "non_afl", "final_reason": "not_evaluated", "final_event_index": ""})
-    apply_afl_merge(rows)
-    return rows
-
-
-def _window_distance_ms(left: dict[str, Any], right: dict[str, Any]) -> int:
-    if int(left["end_ms"]) < int(right["start_ms"]):
-        return int(right["start_ms"]) - int(left["end_ms"])
-    if int(right["end_ms"]) < int(left["start_ms"]):
-        return int(left["start_ms"]) - int(right["end_ms"])
-    return 0
-
-
-def apply_afl_merge(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    strong = [row for row in rows if row["label"] == "strong_afl"]
-    for row in rows:
-        if row["label"] == "strong_afl":
-            row.update(candidate_afl=True, candidate_reason="strong_seed")
-        elif row["label"] == "possible_afl" and any(_window_distance_ms(row, item) <= AFL_POSSIBLE_ATTACH_GAP_MS for item in strong):
-            row.update(candidate_afl=True, candidate_reason=f"possible_near_strong_{AFL_POSSIBLE_ATTACH_GAP_MS}ms")
-        else:
-            row.update(candidate_afl=False, candidate_reason="possible_without_nearby_strong" if row["label"] == "possible_afl" else "non_candidate")
-        row.update(final_label="non_afl", final_reason="not_in_final_segment", final_event_index="")
-
-    candidates = sorted([row for row in rows if row.get("candidate_afl")], key=lambda item: (int(item["start_ms"]), int(item["end_ms"])))
-    if not candidates:
+def rr_clusters(rr: np.ndarray) -> list[dict[str, float | int]]:
+    if rr.size == 0:
         return []
-    segments = [_new_segment(candidates[0])]
-    for row in candidates[1:]:
-        if int(row["start_ms"]) - int(segments[-1]["end_ms"]) <= AFL_BRIDGE_GAP_MS:
-            _extend_segment(segments[-1], row)
+    bins = np.round(rr / AFL_BIN_MS).astype(np.int32)
+    clusters: list[dict[str, float | int]] = []
+    for bin_id in sorted(set(bins.tolist())):
+        values = rr[bins == bin_id]
+        clusters.append({"center_ms": float(np.mean(values)), "count": int(values.size), "ratio": float(values.size / rr.size)})
+    return sorted(clusters, key=lambda item: int(item["count"]), reverse=True)
+
+
+def candidate_clusters(clusters: list[dict[str, float | int]]) -> list[dict[str, float | int]]:
+    kept = [item for item in clusters if int(item["count"]) >= AFL_MIN_CLUSTER_COUNT or float(item["ratio"]) >= AFL_MIN_CLUSTER_RATIO]
+    return kept[:AFL_MAX_CANDIDATE_CLUSTERS]
+
+
+def match_allowed(rr: np.ndarray, allowed: list[float]) -> np.ndarray:
+    if rr.size == 0 or not allowed:
+        return np.zeros(rr.size, dtype=bool)
+    values = np.asarray(allowed, dtype=np.float64)
+    return np.min(np.abs(rr[:, None] - values[None, :]), axis=1) <= AFL_TOL_MS
+
+def transition_coverage(rr: np.ndarray) -> float:
+    if rr.size < 2:
+        return 0.0
+    left = np.round(rr[:-1] / AFL_BIN_MS).astype(np.int32)
+    right = np.round(rr[1:] / AFL_BIN_MS).astype(np.int32)
+    counts: dict[tuple[int, int], int] = {}
+    for pair in zip(left.tolist(), right.tolist(), strict=False):
+        counts[pair] = counts.get(pair, 0) + 1
+    return float(sum(sorted(counts.values(), reverse=True)[:AFL_TRANSITION_TOP_K]) / max(left.size, 1))
+
+
+def find_pattern(rr: np.ndarray) -> tuple[dict[str, Any], list[dict[str, float | int]]]:
+    clusters = rr_clusters(rr)
+    no = {"found": False, "base_rr_ms": None, "allowed_rr_ms": [], "matched_rr_ratio": 0.0, "matched_cluster_count": 0, "minor_cluster_count": 0, "minor_cluster_ratio": 0.0, "rr_cluster_coverage": 0.0, "transition_coverage": 0.0, "reason": "criteria_not_met"}
+    if rr.size < AFL_MIN_VALID_RR:
+        no["reason"] = "insufficient_rr"
+        return no, clusters
+    if len(clusters) < 2:
+        no["reason"] = "single_cluster"
+        return no, clusters
+    if float(clusters[0]["ratio"]) >= AFL_STABLE_TOP1_RATIO and float(clusters[1]["ratio"]) < AFL_STABLE_TOP2_RATIO:
+        no["reason"] = "stable_sinus_like"
+        return no, clusters
+
+    candidates = candidate_clusters(clusters)
+    coverage = float(sum(float(item["ratio"]) for item in candidates))
+    trans_cov = transition_coverage(rr)
+    best: dict[str, Any] | None = None
+    for base_item in sorted(candidates, key=lambda item: float(item["center_ms"])):
+        base = float(base_item["center_ms"])
+        matched_clusters: list[dict[str, float | int]] = []
+        allowed: list[float] = []
+        for cluster in candidates:
+            center = float(cluster["center_ms"])
+            for multiple in range(1, AFL_MAX_MULTIPLE + 1):
+                if abs(center - multiple * base) <= AFL_TOL_MS:
+                    matched_clusters.append(cluster)
+                    allowed.append(float(multiple * base))
+                    break
+        if len(matched_clusters) < AFL_MIN_MATCHED_CLUSTERS:
+            continue
+        allowed = sorted(set(round(item, 3) for item in allowed))
+        matched_ratio = float(np.mean(match_allowed(rr, allowed)))
+        minor_count = min(int(item["count"]) for item in matched_clusters)
+        minor_ratio = min(float(item["ratio"]) for item in matched_clusters)
+        if matched_ratio < AFL_MIN_MATCHED_RR_RATIO:
+            continue
+        if minor_count < AFL_MIN_MINOR_COUNT and minor_ratio < AFL_MIN_MINOR_RATIO:
+            continue
+        if trans_cov < AFL_MIN_TRANSITION_COVERAGE:
+            continue
+        pattern = {"found": True, "base_rr_ms": round(base, 3), "allowed_rr_ms": allowed, "matched_rr_ratio": matched_ratio, "matched_cluster_count": len(matched_clusters), "minor_cluster_count": minor_count, "minor_cluster_ratio": minor_ratio, "rr_cluster_coverage": coverage, "transition_coverage": trans_cov, "reason": "rr_cluster_integer_template"}
+        if best is None or float(pattern["matched_rr_ratio"]) > float(best["matched_rr_ratio"]):
+            best = pattern
+    return (best or no), clusters
+
+
+def evaluate_window(rr_ms: np.ndarray) -> dict[str, Any]:
+    rr = np.asarray(rr_ms, dtype=np.float64)
+    rr = rr[valid_mask(rr)]
+    pattern, clusters = find_pattern(rr)
+    return {"label": "afl" if pattern["found"] else "non_afl", "reason": pattern["reason"], "valid_rr_count": int(rr.size), "cluster_count": len(clusters), "cluster_centers_ms": [round(float(item["center_ms"]), 3) for item in clusters], "cluster_counts": [int(item["count"]) for item in clusters], "cluster_ratios": [round(float(item["ratio"]), 6) for item in clusters], "base_rr_ms": pattern["base_rr_ms"], "allowed_rr_ms": pattern["allowed_rr_ms"], "matched_rr_ratio": round(float(pattern["matched_rr_ratio"]), 6), "matched_cluster_count": pattern["matched_cluster_count"], "minor_cluster_count": pattern["minor_cluster_count"], "minor_cluster_ratio": round(float(pattern["minor_cluster_ratio"]), 6), "rr_cluster_coverage": round(float(pattern["rr_cluster_coverage"]), 6), "transition_coverage": round(float(pattern["transition_coverage"]), 6)}
+
+
+def mask_segments(series: BeatSeries, mask: np.ndarray) -> list[dict[str, Any]]:
+    indices = np.flatnonzero(mask)
+    if indices.size == 0:
+        return []
+    segments: list[dict[str, Any]] = []
+    start = prev = int(indices[0])
+    for raw in indices[1:]:
+        index = int(raw)
+        if int(series.offsets_ms[index]) - int(series.offsets_ms[prev]) <= AFL_EVENT_GAP_MS:
+            prev = index
         else:
-            segments.append(_new_segment(row))
-    final_segments = [segment for segment in segments if int(segment["end_ms"]) - int(segment["start_ms"]) >= AFL_FINAL_MIN_DURATION_MS and int(segment["strong_windows"]) >= AFL_MIN_STRONG_WINDOWS_PER_EVENT]
-    for event_index, segment in enumerate(final_segments, start=1):
+            segments.append({"start_index": start, "end_index": prev, "start_ms": int(series.offsets_ms[start]), "end_ms": int(series.offsets_ms[prev])})
+            start = prev = index
+    segments.append({"start_index": start, "end_index": prev, "start_ms": int(series.offsets_ms[start]), "end_ms": int(series.offsets_ms[prev])})
+    return [item for item in segments if int(item["end_ms"]) - int(item["start_ms"]) >= AFL_FINAL_MIN_DURATION_MS]
+
+def classify_series(series: BeatSeries, window_seconds: int, step_seconds: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    votes = np.zeros(series.rr_ms.size, dtype=np.int32)
+    window_ms, step_ms = window_seconds * 1000, step_seconds * 1000
+    duration_ms = int(series.offsets_ms[-1]) + window_ms if series.offsets_ms.size else 0
+    for window_index, (start_ms, end_ms) in enumerate(make_windows(duration_ms, window_ms, step_ms)):
+        left = int(np.searchsorted(series.offsets_ms, start_ms, side="left"))
+        right = int(np.searchsorted(series.offsets_ms, end_ms, side="left"))
+        rr_window = series.rr_ms[left:right]
+        stats = evaluate_window(rr_window)
+        if stats["label"] == "afl" and stats["allowed_rr_ms"]:
+            local_valid = valid_mask(rr_window)
+            local_match = np.zeros(rr_window.size, dtype=bool)
+            local_match[local_valid] = match_allowed(np.asarray(rr_window, dtype=np.float64)[local_valid], [float(item) for item in stats["allowed_rr_ms"]])
+            votes[left:right][local_match] += 1
+        rows.append({"window_index": window_index, "start_ms": start_ms, "end_ms": end_ms, "duration_seconds": window_seconds, **stats, "final_label": "non_afl", "final_event_index": ""})
+    segments = mask_segments(series, votes > 0)
+    for event_index, segment in enumerate(segments, start=1):
         segment["event_index"] = event_index
-        for row in rows:
-            if int(row["start_ms"]) < int(segment["end_ms"]) and int(row["end_ms"]) > int(segment["start_ms"]):
-                row.update(final_label="afl", final_reason="candidate_segment" if row.get("candidate_afl") else "covered_by_segment", final_event_index=event_index)
-    return final_segments
-
-
-def _new_segment(row: dict[str, Any]) -> dict[str, Any]:
-    return {"start_ms": int(row["start_ms"]), "end_ms": int(row["end_ms"]), "window_count": 1, "strong_windows": 1 if row["label"] == "strong_afl" else 0, "possible_windows": 1 if row["label"] == "possible_afl" else 0, "score_sum": float(row.get("afl_score", 0.0)), "multiple_match_ratio_sum": float(row.get("multiple_match_ratio", 0.0)), "diff_peak_coverage_sum": float(row.get("diff_peak_coverage", 0.0)), "base_diff_values": [float(row["base_diff_ms"])] if row.get("base_diff_ms") not in (None, "") else []}
-
-
-def _extend_segment(segment: dict[str, Any], row: dict[str, Any]) -> None:
-    segment["end_ms"] = max(int(segment["end_ms"]), int(row["end_ms"]))
-    segment["window_count"] = int(segment["window_count"]) + 1
-    segment["strong_windows"] = int(segment["strong_windows"]) + (1 if row["label"] == "strong_afl" else 0)
-    segment["possible_windows"] = int(segment["possible_windows"]) + (1 if row["label"] == "possible_afl" else 0)
-    segment["score_sum"] = float(segment["score_sum"]) + float(row.get("afl_score", 0.0))
-    segment["multiple_match_ratio_sum"] = float(segment["multiple_match_ratio_sum"]) + float(row.get("multiple_match_ratio", 0.0))
-    segment["diff_peak_coverage_sum"] = float(segment["diff_peak_coverage_sum"]) + float(row.get("diff_peak_coverage", 0.0))
-    if row.get("base_diff_ms") not in (None, ""):
-        segment.setdefault("base_diff_values", []).append(float(row["base_diff_ms"]))
-
-
-def finalize_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    finalized = []
-    for index, segment in enumerate(segments, start=1):
-        count = max(1, int(segment.get("window_count", 1)))
-        base_values = np.asarray(segment.get("base_diff_values", []), dtype=np.float64)
-        finalized.append({**segment, "event_index": int(segment.get("event_index", index)), "mean_afl_score": round(float(segment.get("score_sum", 0.0)) / count, 6), "mean_multiple_match_ratio": round(float(segment.get("multiple_match_ratio_sum", 0.0)) / count, 6), "mean_diff_peak_coverage": round(float(segment.get("diff_peak_coverage_sum", 0.0)) / count, 6), "mean_base_diff_ms": round(float(np.mean(base_values)), 3) if base_values.size else None})
-    return finalized
+        overlap = [row for row in rows if int(row["start_ms"]) < int(segment["end_ms"]) and int(row["end_ms"]) > int(segment["start_ms"])]
+        for row in overlap:
+            row["final_label"] = "afl"
+            row["final_event_index"] = event_index
+        segment["window_count"] = len(overlap)
+        segment["pattern_windows"] = sum(row["label"] == "afl" for row in overlap)
+        segment["mean_matched_rr_ratio"] = round(float(np.mean([float(row["matched_rr_ratio"]) for row in overlap])) if overlap else 0.0, 6)
+        segment["allowed_rr_ms"] = sorted({value for row in overlap for value in row.get("allowed_rr_ms", [])})
+    return rows, segments
 
 
 def afl_config(window_seconds: int = AFL_WINDOW_SECONDS, step_seconds: int = AFL_STEP_SECONDS) -> dict[str, Any]:
-    return {"window_seconds": window_seconds, "step_seconds": step_seconds, "min_valid_rr": AFL_MIN_VALID_RR, "rr_min_ms": AFL_RR_MIN_MS, "rr_max_ms": AFL_RR_MAX_MS, "diff_min_ms": AFL_DIFF_MIN_MS, "diff_bin_ms": AFL_DIFF_BIN_MS, "top_diff_peaks": AFL_TOP_DIFF_PEAKS, "multiple_tolerance_ms": AFL_MULTIPLE_TOLERANCE_MS, "max_multiple": AFL_MAX_MULTIPLE, "base_diff_min_ms": AFL_BASE_DIFF_MIN_MS, "base_diff_max_ms": AFL_BASE_DIFF_MAX_MS, "possible_attach_gap_ms": AFL_POSSIBLE_ATTACH_GAP_MS, "bridge_gap_ms": AFL_BRIDGE_GAP_MS, "final_min_duration_ms": AFL_FINAL_MIN_DURATION_MS, "min_strong_windows_per_event": AFL_MIN_STRONG_WINDOWS_PER_EVENT}
+    return {"window_seconds": window_seconds, "step_seconds": step_seconds, "min_valid_rr": AFL_MIN_VALID_RR, "rr_min_ms": AFL_RR_MIN_MS, "rr_max_ms": AFL_RR_MAX_MS, "cluster_bin_ms": AFL_BIN_MS, "rr_tolerance_ms": AFL_TOL_MS, "max_multiple": AFL_MAX_MULTIPLE, "min_cluster_count": AFL_MIN_CLUSTER_COUNT, "min_cluster_ratio": AFL_MIN_CLUSTER_RATIO, "min_matched_rr_ratio": AFL_MIN_MATCHED_RR_RATIO, "min_transition_coverage": AFL_MIN_TRANSITION_COVERAGE, "event_gap_ms": AFL_EVENT_GAP_MS, "final_min_duration_ms": AFL_FINAL_MIN_DURATION_MS}
 
 
 def segments_to_events(segments: list[dict[str, Any]], window_seconds: int, step_seconds: int) -> list[dict[str, Any]]:
     events = []
-    for index, segment in enumerate(finalize_segments(segments), start=1):
+    for index, segment in enumerate(segments, start=1):
         start_ms, end_ms = int(segment["start_ms"]), int(segment["end_ms"])
-        events.append({"type": "af_family", "subtype": "flutter", "layer": "rr_afl_filter", "rule": "rr_diff_multiple_10min", "event_index": int(segment.get("event_index", index)), "t0_ms": start_ms, "t1_ms": end_ms, "time": f"{start_ms} ms ~ {end_ms} ms", "duration": format_hms((end_ms - start_ms) / 1000.0), "stats": {"window_count": int(segment["window_count"]), "strong_windows": int(segment["strong_windows"]), "possible_windows": int(segment["possible_windows"]), "mean_afl_score": segment["mean_afl_score"], "mean_multiple_match_ratio": segment["mean_multiple_match_ratio"], "mean_diff_peak_coverage": segment["mean_diff_peak_coverage"], "mean_base_diff_ms": segment["mean_base_diff_ms"], "config": afl_config(window_seconds, step_seconds)}})
+        events.append({"type": "af_family", "subtype": "flutter", "layer": "rr_afl_filter", "rule": "rr_cluster_integer_template", "event_index": int(segment.get("event_index", index)), "t0_ms": start_ms, "t1_ms": end_ms, "time": f"{start_ms} ms ~ {end_ms} ms", "duration": format_hms((end_ms - start_ms) / 1000.0), "stats": {"window_count": int(segment.get("window_count", 0)), "pattern_windows": int(segment.get("pattern_windows", 0)), "mean_matched_rr_ratio": segment.get("mean_matched_rr_ratio", 0.0), "allowed_rr_ms": segment.get("allowed_rr_ms", []), "config": afl_config(window_seconds, step_seconds)}})
     return events
 
 
 def _csv_value(value: Any) -> str:
-    if isinstance(value, (list, tuple)):
-        return json.dumps(value, ensure_ascii=False)
-    return "" if value is None else str(value)
+    return json.dumps(value, ensure_ascii=False) if isinstance(value, (list, tuple)) else "" if value is None else str(value)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["window_index", "start_ms", "end_ms", "duration_seconds", "valid_rr_count", "raw_diff_count", "valid_diff_count", "nonzero_diff_ratio", "mean_rr_ms", "mean_hr", "rr_cv", "dominant_rr_ratio", "base_diff_ms", "matched_diff_count", "multiple_match_ratio", "diff_peak_count", "diff_top_peak_ms", "diff_peak_coverage", "diff_peak_centers_ms", "diff_peak_counts", "afl_score", "label", "reason", "candidate_afl", "candidate_reason", "final_label", "final_reason", "final_event_index"]
+    fieldnames = ["window_index", "start_ms", "end_ms", "duration_seconds", "label", "final_label", "final_event_index", "reason", "valid_rr_count", "cluster_count", "cluster_centers_ms", "cluster_counts", "cluster_ratios", "base_rr_ms", "allowed_rr_ms", "matched_rr_ratio", "matched_cluster_count", "minor_cluster_count", "minor_cluster_ratio", "rr_cluster_coverage", "transition_coverage"]
     with path.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -329,16 +276,16 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def summarize(rows: list[dict[str, Any]], series: BeatSeries, segments: list[dict[str, Any]], window_seconds: int, step_seconds: int) -> dict[str, Any]:
-    label_counts: dict[str, int] = {}
-    final_counts: dict[str, int] = {}
+    labels: dict[str, int] = {}
+    finals: dict[str, int] = {}
     for row in rows:
-        label_counts[str(row.get("label", "non_afl"))] = label_counts.get(str(row.get("label", "non_afl")), 0) + 1
-        final_counts[str(row.get("final_label", "non_afl"))] = final_counts.get(str(row.get("final_label", "non_afl")), 0) + 1
-    return {"source_csv": str(series.source_csv), "window_count": len(rows), "label_counts": label_counts, "final_label_counts": final_counts, "event_count": len(segments), "events": finalize_segments(segments), "config": afl_config(window_seconds, step_seconds)}
+        labels[str(row.get("label", "non_afl"))] = labels.get(str(row.get("label", "non_afl")), 0) + 1
+        finals[str(row.get("final_label", "non_afl"))] = finals.get(str(row.get("final_label", "non_afl")), 0) + 1
+    return {"source_csv": str(series.source_csv), "window_count": len(rows), "label_counts": labels, "final_label_counts": finals, "event_count": len(segments), "events": segments, "config": afl_config(window_seconds, step_seconds)}
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="RR-diff regularity filter for atrial flutter candidate screening.")
+    parser = argparse.ArgumentParser(description="RR-cluster integer-template filter for atrial flutter screening.")
     parser.add_argument("--csv", required=True, help="Beat CSV with time offsets and RR intervals.")
     parser.add_argument("--out-csv", default="", help="Output window CSV path.")
     parser.add_argument("--out-json", default="", help="Output summary JSON path.")
@@ -362,8 +309,7 @@ def main() -> None:
     if not csv_path.exists():
         raise SystemExit(f"CSV not found: {csv_path}")
     series = load_beat_series(csv_path)
-    rows = classify_series(series, args.window_seconds, args.step_seconds)
-    segments = apply_afl_merge(rows)
+    rows, segments = classify_series(series, args.window_seconds, args.step_seconds)
     out_root = default_output_root(csv_path)
     out_csv = Path(args.out_csv).resolve() if args.out_csv else out_root / f"{csv_path.stem}_rr_afl_windows.csv"
     out_json = Path(args.out_json).resolve() if args.out_json else out_root / f"{csv_path.stem}_rr_afl_summary.json"
@@ -380,3 +326,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+

@@ -12,7 +12,7 @@ from evaluate_subitem_metrics import build_confusion, compute_metrics, load_pred
 
 
 def _norm_label(label: str) -> str:
-    return "Af" if label in {"AF", "Af"} else label
+    return "AF" if label in {"AF", "Af"} else label
 
 
 def _format_hms(seconds: float) -> str:

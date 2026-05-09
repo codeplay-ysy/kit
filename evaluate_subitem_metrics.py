@@ -17,9 +17,11 @@ NO_PRED = "__NO_PRED__"
 NO_TRUE = "__NO_TRUE__"
 DEFAULT_LABEL_ORDER = ["N", "AF", "S", "Se", "V", "Ve"]
 LABEL_ALIASES = {
+    "AF": "AF",
     "Af": "AF",
     "af": "AF",
 }
+
 
 
 @dataclass(slots=True)
