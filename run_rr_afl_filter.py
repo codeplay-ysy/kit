@@ -15,19 +15,22 @@ AFL_MIN_VALID_RR = 100
 AFL_RR_MIN_MS = 300
 AFL_RR_MAX_MS = 2000
 AFL_BIN_MS = 40
-AFL_TOL_MS = 50
+AFL_TOL_MS = 40
 AFL_MAX_MULTIPLE = 4
 AFL_MIN_CLUSTER_COUNT = 8
 AFL_MIN_CLUSTER_RATIO = 0.03
 AFL_MAX_CANDIDATE_CLUSTERS = 8
 AFL_MIN_MATCHED_CLUSTERS = 2
-AFL_MIN_MATCHED_RR_RATIO = 0.60
-AFL_MIN_MINOR_COUNT = 5
-AFL_MIN_MINOR_RATIO = 0.03
+AFL_MIN_MATCHED_RR_RATIO = 0.70
+AFL_MIN_MINOR_COUNT = 8
+AFL_MIN_MINOR_RATIO = 0.04
 AFL_STABLE_TOP1_RATIO = 0.90
 AFL_STABLE_TOP2_RATIO = 0.05
 AFL_MIN_TRANSITION_COVERAGE = 0.45
 AFL_TRANSITION_TOP_K = 6
+AFL_CLUSTER_MERGE_MS = 80
+AFL_MIN_MULTIPLIER_LEVELS = 2
+AFL_MIN_SPAN_RATIO = 1.4
 AFL_EVENT_GAP_MS = 10_000
 AFL_FINAL_MIN_DURATION_MS = 60_000
 
@@ -122,11 +125,33 @@ def rr_clusters(rr: np.ndarray) -> list[dict[str, float | int]]:
     if rr.size == 0:
         return []
     bins = np.round(rr / AFL_BIN_MS).astype(np.int32)
-    clusters: list[dict[str, float | int]] = []
+    raw_clusters: list[dict[str, float | int]] = []
     for bin_id in sorted(set(bins.tolist())):
         values = rr[bins == bin_id]
-        clusters.append({"center_ms": float(np.mean(values)), "count": int(values.size), "ratio": float(values.size / rr.size)})
-    return sorted(clusters, key=lambda item: int(item["count"]), reverse=True)
+        raw_clusters.append({"center_ms": float(np.mean(values)), "count": int(values.size), "ratio": float(values.size / rr.size)})
+    merged = merge_nearby_clusters(raw_clusters, int(rr.size))
+    return sorted(merged, key=lambda item: int(item["count"]), reverse=True)
+
+
+def merge_nearby_clusters(clusters: list[dict[str, float | int]], total_count: int) -> list[dict[str, float | int]]:
+    if not clusters:
+        return []
+    ordered = sorted(clusters, key=lambda item: float(item["center_ms"]))
+    merged: list[dict[str, float | int]] = []
+    current_values: list[tuple[float, int]] = [(float(ordered[0]["center_ms"]), int(ordered[0]["count"]))]
+    for cluster in ordered[1:]:
+        center = float(cluster["center_ms"])
+        count = int(cluster["count"])
+        current_center = sum(value * weight for value, weight in current_values) / max(sum(weight for _, weight in current_values), 1)
+        if abs(center - current_center) <= AFL_CLUSTER_MERGE_MS:
+            current_values.append((center, count))
+        else:
+            total = sum(weight for _, weight in current_values)
+            merged.append({"center_ms": sum(value * weight for value, weight in current_values) / max(total, 1), "count": total, "ratio": total / max(total_count, 1)})
+            current_values = [(center, count)]
+    total = sum(weight for _, weight in current_values)
+    merged.append({"center_ms": sum(value * weight for value, weight in current_values) / max(total, 1), "count": total, "ratio": total / max(total_count, 1)})
+    return merged
 
 
 def candidate_clusters(clusters: list[dict[str, float | int]]) -> list[dict[str, float | int]]:
@@ -153,7 +178,7 @@ def transition_coverage(rr: np.ndarray) -> float:
 
 def find_pattern(rr: np.ndarray) -> tuple[dict[str, Any], list[dict[str, float | int]]]:
     clusters = rr_clusters(rr)
-    no = {"found": False, "base_rr_ms": None, "allowed_rr_ms": [], "matched_rr_ratio": 0.0, "matched_cluster_count": 0, "minor_cluster_count": 0, "minor_cluster_ratio": 0.0, "rr_cluster_coverage": 0.0, "transition_coverage": 0.0, "reason": "criteria_not_met"}
+    no = {"found": False, "base_rr_ms": None, "allowed_rr_ms": [], "matched_rr_ratio": 0.0, "matched_cluster_count": 0, "matched_multiplier_count": 0, "matched_multipliers": [], "rr_span_ratio": 0.0, "minor_cluster_count": 0, "minor_cluster_ratio": 0.0, "rr_cluster_coverage": 0.0, "transition_coverage": 0.0, "reason": "criteria_not_met"}
     if rr.size < AFL_MIN_VALID_RR:
         no["reason"] = "insufficient_rr"
         return no, clusters
@@ -171,17 +196,27 @@ def find_pattern(rr: np.ndarray) -> tuple[dict[str, Any], list[dict[str, float |
     for base_item in sorted(candidates, key=lambda item: float(item["center_ms"])):
         base = float(base_item["center_ms"])
         matched_clusters: list[dict[str, float | int]] = []
+        matched_multipliers: list[int] = []
         allowed: list[float] = []
         for cluster in candidates:
             center = float(cluster["center_ms"])
             for multiple in range(1, AFL_MAX_MULTIPLE + 1):
                 if abs(center - multiple * base) <= AFL_TOL_MS:
                     matched_clusters.append(cluster)
+                    matched_multipliers.append(multiple)
                     allowed.append(float(multiple * base))
                     break
+        distinct_multipliers = sorted(set(matched_multipliers))
         if len(matched_clusters) < AFL_MIN_MATCHED_CLUSTERS:
             continue
+        if len(distinct_multipliers) < AFL_MIN_MULTIPLIER_LEVELS or max(distinct_multipliers) < 2:
+            continue
         allowed = sorted(set(round(item, 3) for item in allowed))
+        if len(allowed) < AFL_MIN_MATCHED_CLUSTERS:
+            continue
+        span_ratio = max(allowed) / min(allowed) if min(allowed) > 0 else 0.0
+        if span_ratio < AFL_MIN_SPAN_RATIO:
+            continue
         matched_ratio = float(np.mean(match_allowed(rr, allowed)))
         minor_count = min(int(item["count"]) for item in matched_clusters)
         minor_ratio = min(float(item["ratio"]) for item in matched_clusters)
@@ -191,7 +226,7 @@ def find_pattern(rr: np.ndarray) -> tuple[dict[str, Any], list[dict[str, float |
             continue
         if trans_cov < AFL_MIN_TRANSITION_COVERAGE:
             continue
-        pattern = {"found": True, "base_rr_ms": round(base, 3), "allowed_rr_ms": allowed, "matched_rr_ratio": matched_ratio, "matched_cluster_count": len(matched_clusters), "minor_cluster_count": minor_count, "minor_cluster_ratio": minor_ratio, "rr_cluster_coverage": coverage, "transition_coverage": trans_cov, "reason": "rr_cluster_integer_template"}
+        pattern = {"found": True, "base_rr_ms": round(base, 3), "allowed_rr_ms": allowed, "matched_rr_ratio": matched_ratio, "matched_cluster_count": len(matched_clusters), "matched_multiplier_count": len(distinct_multipliers), "matched_multipliers": distinct_multipliers, "rr_span_ratio": span_ratio, "minor_cluster_count": minor_count, "minor_cluster_ratio": minor_ratio, "rr_cluster_coverage": coverage, "transition_coverage": trans_cov, "reason": "rr_cluster_integer_template"}
         if best is None or float(pattern["matched_rr_ratio"]) > float(best["matched_rr_ratio"]):
             best = pattern
     return (best or no), clusters
@@ -201,7 +236,7 @@ def evaluate_window(rr_ms: np.ndarray) -> dict[str, Any]:
     rr = np.asarray(rr_ms, dtype=np.float64)
     rr = rr[valid_mask(rr)]
     pattern, clusters = find_pattern(rr)
-    return {"label": "afl" if pattern["found"] else "non_afl", "reason": pattern["reason"], "valid_rr_count": int(rr.size), "cluster_count": len(clusters), "cluster_centers_ms": [round(float(item["center_ms"]), 3) for item in clusters], "cluster_counts": [int(item["count"]) for item in clusters], "cluster_ratios": [round(float(item["ratio"]), 6) for item in clusters], "base_rr_ms": pattern["base_rr_ms"], "allowed_rr_ms": pattern["allowed_rr_ms"], "matched_rr_ratio": round(float(pattern["matched_rr_ratio"]), 6), "matched_cluster_count": pattern["matched_cluster_count"], "minor_cluster_count": pattern["minor_cluster_count"], "minor_cluster_ratio": round(float(pattern["minor_cluster_ratio"]), 6), "rr_cluster_coverage": round(float(pattern["rr_cluster_coverage"]), 6), "transition_coverage": round(float(pattern["transition_coverage"]), 6)}
+    return {"label": "afl" if pattern["found"] else "non_afl", "reason": pattern["reason"], "valid_rr_count": int(rr.size), "cluster_count": len(clusters), "cluster_centers_ms": [round(float(item["center_ms"]), 3) for item in clusters], "cluster_counts": [int(item["count"]) for item in clusters], "cluster_ratios": [round(float(item["ratio"]), 6) for item in clusters], "base_rr_ms": pattern["base_rr_ms"], "allowed_rr_ms": pattern["allowed_rr_ms"], "matched_rr_ratio": round(float(pattern["matched_rr_ratio"]), 6), "matched_cluster_count": pattern["matched_cluster_count"], "matched_multiplier_count": pattern["matched_multiplier_count"], "matched_multipliers": pattern["matched_multipliers"], "rr_span_ratio": round(float(pattern["rr_span_ratio"]), 6), "minor_cluster_count": pattern["minor_cluster_count"], "minor_cluster_ratio": round(float(pattern["minor_cluster_ratio"]), 6), "rr_cluster_coverage": round(float(pattern["rr_cluster_coverage"]), 6), "transition_coverage": round(float(pattern["transition_coverage"]), 6)}
 
 
 def mask_segments(series: BeatSeries, mask: np.ndarray) -> list[dict[str, Any]]:
@@ -251,7 +286,7 @@ def classify_series(series: BeatSeries, window_seconds: int, step_seconds: int) 
 
 
 def afl_config(window_seconds: int = AFL_WINDOW_SECONDS, step_seconds: int = AFL_STEP_SECONDS) -> dict[str, Any]:
-    return {"window_seconds": window_seconds, "step_seconds": step_seconds, "min_valid_rr": AFL_MIN_VALID_RR, "rr_min_ms": AFL_RR_MIN_MS, "rr_max_ms": AFL_RR_MAX_MS, "cluster_bin_ms": AFL_BIN_MS, "rr_tolerance_ms": AFL_TOL_MS, "max_multiple": AFL_MAX_MULTIPLE, "min_cluster_count": AFL_MIN_CLUSTER_COUNT, "min_cluster_ratio": AFL_MIN_CLUSTER_RATIO, "min_matched_rr_ratio": AFL_MIN_MATCHED_RR_RATIO, "min_transition_coverage": AFL_MIN_TRANSITION_COVERAGE, "event_gap_ms": AFL_EVENT_GAP_MS, "final_min_duration_ms": AFL_FINAL_MIN_DURATION_MS}
+    return {"window_seconds": window_seconds, "step_seconds": step_seconds, "min_valid_rr": AFL_MIN_VALID_RR, "rr_min_ms": AFL_RR_MIN_MS, "rr_max_ms": AFL_RR_MAX_MS, "cluster_bin_ms": AFL_BIN_MS, "cluster_merge_ms": AFL_CLUSTER_MERGE_MS, "rr_tolerance_ms": AFL_TOL_MS, "max_multiple": AFL_MAX_MULTIPLE, "min_multiplier_levels": AFL_MIN_MULTIPLIER_LEVELS, "min_span_ratio": AFL_MIN_SPAN_RATIO, "min_cluster_count": AFL_MIN_CLUSTER_COUNT, "min_cluster_ratio": AFL_MIN_CLUSTER_RATIO, "min_matched_rr_ratio": AFL_MIN_MATCHED_RR_RATIO, "min_transition_coverage": AFL_MIN_TRANSITION_COVERAGE, "event_gap_ms": AFL_EVENT_GAP_MS, "final_min_duration_ms": AFL_FINAL_MIN_DURATION_MS}
 
 
 def segments_to_events(segments: list[dict[str, Any]], window_seconds: int, step_seconds: int) -> list[dict[str, Any]]:
@@ -268,7 +303,7 @@ def _csv_value(value: Any) -> str:
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["window_index", "start_ms", "end_ms", "duration_seconds", "label", "final_label", "final_event_index", "reason", "valid_rr_count", "cluster_count", "cluster_centers_ms", "cluster_counts", "cluster_ratios", "base_rr_ms", "allowed_rr_ms", "matched_rr_ratio", "matched_cluster_count", "minor_cluster_count", "minor_cluster_ratio", "rr_cluster_coverage", "transition_coverage"]
+    fieldnames = ["window_index", "start_ms", "end_ms", "duration_seconds", "label", "final_label", "final_event_index", "reason", "valid_rr_count", "cluster_count", "cluster_centers_ms", "cluster_counts", "cluster_ratios", "base_rr_ms", "allowed_rr_ms", "matched_rr_ratio", "matched_cluster_count", "matched_multiplier_count", "matched_multipliers", "rr_span_ratio", "minor_cluster_count", "minor_cluster_ratio", "rr_cluster_coverage", "transition_coverage"]
     with path.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
