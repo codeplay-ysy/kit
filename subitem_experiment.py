@@ -390,9 +390,12 @@ def run_experiment(
         energy_v1 = energy_v5 = energy_ratio_v1 = energy_ratio_v5 = energy_ratio_max = None
 
         rhythm_mark = rhythm_marks[index]
-        if rhythm_mark is not None:
+        if rhythm_mark is not None and rhythm_mark.subtype in {"flutter", "fibrillation", "mixed_or_uncertain"}:
             symbol = "AF"
             note = f"af_family_{rhythm_mark.subtype}_event"
+        elif rhythm_mark is not None and rhythm_mark.subtype == "suspicious_flutter_like":
+            symbol = "N"
+            note = "af_family_suspicious_flutter_like_event"
         elif final_state in {"early", "escape"}:
             context_indices = [candidate for candidate in eligible_indices if candidate < index][-CONTEXT_SIDE:]
             if len(context_indices) >= 2:

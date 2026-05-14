@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
         default="all",
         help="all: run both stages; preprocess: only steps 1-4; analysis: only steps 5-12.",
     )
+    parser.add_argument("--a-flutter-mode", choices=["rr1d", "rr2d_v2"], default="rr2d_v2", help="AFL detector branch: legacy 1D RR or new RR2D structure v2.")
     parser.add_argument("--rerun-preprocess", action="store_true", help="Rerun preprocessing steps even when their expected outputs already exist.")
     parser.add_argument("--skip-existing-analysis", action="store_true", help="Also skip analysis steps when their expected outputs already exist.")
     parser.add_argument("--skip-existing", action="store_true", help="Skip a whole case if its final evaluation PDF already exists.")
@@ -78,7 +79,7 @@ def existing_outputs(outputs: tuple[Path, ...]) -> bool:
     return bool(outputs) and all(output_path(path).exists() for path in outputs)
 
 
-def build_commands(case: CaseFiles, leads: list[str], window_seconds: int) -> list[CommandSpec]:
+def build_commands(case: CaseFiles, leads: list[str], window_seconds: int, aflutter_mode: str) -> list[CommandSpec]:
     out_root = Path("out") / case.tag
     quality_csv = out_root / "quality" / f"{case.tag}_ecg_quality_{window_seconds}s.csv"
     ch1_csv = out_root / "rpeaks" / "ECG_CH1_rpeaks.csv"
@@ -89,16 +90,17 @@ def build_commands(case: CaseFiles, leads: list[str], window_seconds: int) -> li
     rr2d_windows_csv = out_root / "rr_2d_filter" / f"{case.tag}_rr_2d_windows.csv"
     rr2d_summary_json = out_root / "rr_2d_filter" / f"{case.tag}_rr_2d_summary.json"
     rr2d_events_json = out_root / "rr_2d_filter" / f"{case.tag}_rr_2d_events.json"
-    afl_windows_csv = out_root / "rr_afl_filter" / f"merged_rpeaks_by_quality_window_v5_priority_{case.tag}_rr_afl_windows.csv"
-    afl_summary_json = out_root / "rr_afl_filter" / f"merged_rpeaks_by_quality_window_v5_priority_{case.tag}_rr_afl_summary.json"
-    afl_events_json = out_root / "rr_afl_filter" / f"merged_rpeaks_by_quality_window_v5_priority_{case.tag}_rr_afl_events.json"
+    afl_out_dir = out_root / ("rr_afl_filter_rr2d" if aflutter_mode == "rr2d_v2" else "rr_afl_filter")
+    afl_windows_csv = afl_out_dir / f"merged_rpeaks_by_quality_window_v5_priority_{case.tag}_rr_afl_windows.csv"
+    afl_summary_json = afl_out_dir / f"merged_rpeaks_by_quality_window_v5_priority_{case.tag}_rr_afl_summary.json"
+    afl_events_json = afl_out_dir / f"merged_rpeaks_by_quality_window_v5_priority_{case.tag}_rr_afl_events.json"
     af_family_events_json = out_root / "af_family_events.json"
     subitem_csv = out_root / "subitem" / "subitem_experiment_beats_with_af_family.csv"
     subitem_summary_json = out_root / "subitem" / "subitem_experiment_summary_with_af_family.json"
-    subitem_evaluation_pdf = out_root / "subitem" / "subitem_evaluation_with_af_family.pdf"
+    subitem_evaluation_pdf = out_root / "subitem" / "subitem_evaluation_with_af_family_afl_v2.pdf"
     rr2d_timeline_pdf = out_root / "rr_2d_filter" / f"{case.tag}_rr_2d_timeline_final_label.pdf"
-    afl_label_timeline_pdf = out_root / "rr_afl_filter" / f"{case.tag}_rr_afl_label_timeline.pdf"
-    afl_final_timeline_pdf = out_root / "rr_afl_filter" / f"{case.tag}_rr_afl_final_timeline.pdf"
+    afl_label_timeline_pdf = afl_out_dir / f"{case.tag}_rr_afl_label_timeline_afl_v2.pdf"
+    afl_final_timeline_pdf = afl_out_dir / f"{case.tag}_rr_afl_final_timeline_afl_v2.pdf"
 
     commands: list[CommandSpec] = []
     lead_outputs = {
@@ -157,7 +159,21 @@ def build_commands(case: CaseFiles, leads: list[str], window_seconds: int) -> li
             ),
             CommandSpec(
                 description="RR AFL filter",
-                args=["run_rr_afl_filter.py", "--csv", str(merged_csv)],
+                args=(
+                    [
+                        "run_rr2d_afl_structure_filter.py",
+                        "--csv",
+                        str(merged_csv),
+                        "--out-csv",
+                        str(afl_windows_csv),
+                        "--out-json",
+                        str(afl_summary_json),
+                        "--out-events-json",
+                        str(afl_events_json),
+                    ]
+                    if aflutter_mode == "rr2d_v2"
+                    else ["run_rr_afl_filter.py", "--csv", str(merged_csv)]
+                ),
                 stage="analysis",
                 outputs=(afl_windows_csv, afl_summary_json, afl_events_json),
             ),
@@ -296,7 +312,7 @@ def run_case(case: CaseFiles, args: argparse.Namespace) -> bool:
     print(f"EDF: {case.edf.name}", flush=True)
     print(f"Truth CSV: {case.truth_csv.name}", flush=True)
 
-    selected_commands = [spec for spec in build_commands(case, args.leads, args.window_seconds) if selected_by_stage(spec, args.stage)]
+    selected_commands = [spec for spec in build_commands(case, args.leads, args.window_seconds, args.a_flutter_mode) if selected_by_stage(spec, args.stage)]
     for index, spec in enumerate(selected_commands, start=1):
         print(f"\n[{index}] {spec.description} ({spec.stage})", flush=True)
         if should_skip_step(spec, args):

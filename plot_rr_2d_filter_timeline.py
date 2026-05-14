@@ -16,17 +16,18 @@ from matplotlib.patches import Patch
 
 
 LABEL_COLORS = {
-    "strong_af": "#d73027",
-    "possible_af": "#fdae61",
-    "enhanced_af": "#7b3294",
-    "mid_af": "#1b9e77",
-    "long_af": "#2166ac",
-    "non_af": "#9e9e9e",
     "af": "#d73027",
-    "strong_afl": "#542788",
-    "possible_afl": "#998ec3",
+    "strong_af": "#ef5350",
+    "possible_af": "#fb8c00",
+    "enhanced_af": "#8e24aa",
+    "mid_af": "#00897b",
+    "long_af": "#1e88e5",
+    "non_af": "#9e9e9e",
+    "afl": "#6a3d9a",
+    "strong_afl": "#7b3294",
+    "possible_afl": "#ab47bc",
+    "suspicious": "#e6ab02",
     "non_afl": "#bdbdbd",
-    "afl": "#542788",
 }
 
 
