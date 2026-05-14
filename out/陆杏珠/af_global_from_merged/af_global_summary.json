@@ -1,9 +1,0 @@
-{
-  "edf": "H180418153RNZ_陆杏珠.edf",
-  "csv": "out\\陆杏珠\\merged\\merged_rpeaks_by_quality_window_v5_priority_陆杏珠.csv",
-  "ignore_sqi": true,
-  "event_count": 162,
-  "positive_window_count": 728,
-  "events_json": "out\\陆杏珠\\af_global_from_merged\\af_global_events.json",
-  "positive_windows_csv": "out\\陆杏珠\\af_global_from_merged\\af_global_positive_windows.csv"
-}

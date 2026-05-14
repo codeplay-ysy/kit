@@ -1,9 +1,0 @@
-{
-  "source_csv": "D:\\kit\\out\\陆杏珠\\merged\\merged_rpeaks_by_quality_window_v5_priority_陆杏珠.csv",
-  "window_seconds": 30,
-  "step_seconds": 5,
-  "window_count": 10482,
-  "label_counts": {
-    "non_af": 10482
-  }
-}

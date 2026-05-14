@@ -1,9 +1,0 @@
-{
-  "edf": "H1803291HDFUG_朱林生.edf",
-  "csv": "H1803291HDFUG_朱林生.csv",
-  "ignore_sqi": true,
-  "event_count": 4,
-  "positive_window_count": 15,
-  "events_json": "out\\朱林生\\af_global\\af_global_events.json",
-  "positive_windows_csv": "out\\朱林生\\af_global\\af_global_positive_windows.csv"
-}
