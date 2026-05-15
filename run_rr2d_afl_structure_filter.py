@@ -12,8 +12,8 @@ RR_MIN_MS = 300
 RR_MAX_MS = 2000
 MIN_VALID_RR = 40
 LOCAL_RADIUS = 8
-SPECIAL_RATIOS = [0.25, 1/3, 0.5, 2/3, 0.75, 4/3, 1.5, 2.0, 3.0, 4.0]
-RATIO_LOG_TOL = 0.12
+SPECIAL_RATIOS = [4/3, 1.5, 2.0, 3.0, 4.0]
+RATIO_LOG_TOL = 0.07
 SELF_LOOP_LOG_TOL = 0.08
 VALUE_BIN_MS = 50
 VALUE_MERGE_MS = 80
@@ -27,7 +27,12 @@ MIN_VALUE_CENTER_COUNT = 2
 ECTOPY_RECIPROCAL_TOL = 0.10
 ECTOPY_STRONG_RATIO = 0.72
 EVENT_GAP_MS = 10_000
-FINAL_MIN_DURATION_MS = 60_000
+FINAL_MIN_DURATION_MS = 30_000
+SEGMENT_CANDIDATE_GAP_MS = 15_000
+SEGMENT_MIN_CANDIDATES = 3
+SEGMENT_MIN_AFL_CANDIDATES = 4
+SEGMENT_MAX_CLEAR_AFL_SLOPE_TYPES = 4
+SEGMENT_ECTOPY_FRACTION = 0.25
 
 @dataclass(slots=True)
 class BeatSeries:
@@ -88,9 +93,13 @@ def valid_rr(rr_ms: np.ndarray) -> np.ndarray:
 
 def match_special_ratio(ratio: float) -> float | None:
     if ratio <= 0: return None
-    diffs = [abs(np.log(ratio / t)) for t in SPECIAL_RATIOS]
+    normalized = ratio if ratio >= 1.0 else 1.0 / ratio
+    diffs = [abs(np.log(normalized / t)) for t in SPECIAL_RATIOS]
     best = int(np.argmin(diffs))
-    return float(SPECIAL_RATIOS[best]) if diffs[best] <= RATIO_LOG_TOL else None
+    if diffs[best] > RATIO_LOG_TOL:
+        return None
+    matched = float(SPECIAL_RATIOS[best])
+    return matched if ratio >= 1.0 else round(1.0 / matched, 6)
 
 def is_self_loop(ratio: float) -> bool:
     return ratio > 0 and abs(np.log(ratio)) <= SELF_LOOP_LOG_TOL
@@ -154,6 +163,94 @@ def evaluate_local(rr: np.ndarray, ratios: np.ndarray, matched: list[float | Non
     return {"label": "non_afl", "reason": "weak_local_structure", "special_count": count, "bridged_run": run, "centers": centers, "reciprocal_ratio": recip, "range_start": left, "range_end": right}
 
 
+def build_local_candidates(series: BeatSeries) -> list[dict[str, Any]]:
+    rr = np.asarray(series.rr_ms, dtype=np.float64)
+    valid = np.isfinite(rr) & (rr >= RR_MIN_MS) & (rr <= RR_MAX_MS)
+    ratios = np.full(max(rr.size - 1, 0), np.nan, dtype=np.float64)
+    matched: list[float | None] = []
+    for i in range(ratios.size):
+        if valid[i] and valid[i + 1] and rr[i] > 0:
+            ratios[i] = rr[i + 1] / rr[i]
+            matched.append(match_special_ratio(float(ratios[i])))
+        else:
+            matched.append(None)
+    special_indices = [i for i, value in enumerate(matched) if value is not None]
+    candidates: list[dict[str, Any]] = []
+    for index in special_indices:
+        local = evaluate_local(rr, ratios, matched, index)
+        if local["label"] == "non_afl":
+            continue
+        start_i = max(0, int(local["range_start"]))
+        end_i = min(series.offsets_ms.size - 1, int(local["range_end"]) + 1)
+        candidates.append({
+            "start_index": start_i,
+            "end_index": end_i,
+            "start_ms": int(series.offsets_ms[start_i]),
+            "end_ms": int(series.offsets_ms[end_i]),
+            "label": str(local["label"]),
+            "reason": str(local["reason"]),
+            "special_count": int(local["special_count"]),
+            "bridged_run": int(local["bridged_run"]),
+            "centers": local["centers"],
+            "reciprocal_ratio": float(local["reciprocal_ratio"]),
+            "slope": float(matched[index] or 0.0),
+        })
+    return candidates
+
+
+def merge_candidate_segments(candidates: list[dict[str, Any]], gap_ms: int = SEGMENT_CANDIDATE_GAP_MS) -> list[dict[str, Any]]:
+    if not candidates:
+        return []
+    ordered = sorted(candidates, key=lambda item: (int(item["start_ms"]), int(item["end_ms"])))
+    groups: list[list[dict[str, Any]]] = [[ordered[0]]]
+    for candidate in ordered[1:]:
+        current_end = max(int(item["end_ms"]) for item in groups[-1])
+        if int(candidate["start_ms"]) - current_end <= gap_ms:
+            groups[-1].append(candidate)
+        else:
+            groups.append([candidate])
+    segments: list[dict[str, Any]] = []
+    for group in groups:
+        start_index = min(int(item["start_index"]) for item in group)
+        end_index = max(int(item["end_index"]) for item in group)
+        start_ms = min(int(item["start_ms"]) for item in group)
+        end_ms = max(int(item["end_ms"]) for item in group)
+        duration_ms = end_ms - start_ms
+        labels = [str(item["label"]) for item in group]
+        reasons = [str(item["reason"]) for item in group]
+        slopes = [float(item["slope"]) for item in group if float(item["slope"]) > 0]
+        centers = sorted({float(center) for item in group for center in item.get("centers", [])})
+        ectopy_count = sum(reason == "ectopy_like_reciprocal_pattern" for reason in reasons)
+        afl_local_count = sum(label == "afl" for label in labels)
+        candidate_count = len(group)
+        slope_types = len({round(slope if slope >= 1 else 1 / slope, 3) for slope in slopes})
+        mean_recip = float(np.mean([float(item["reciprocal_ratio"]) for item in group])) if group else 0.0
+        if candidate_count < SEGMENT_MIN_CANDIDATES or duration_ms < FINAL_MIN_DURATION_MS:
+            label, reason = "non_afl", "short_or_sparse_candidate_segment"
+        elif ectopy_count / max(candidate_count, 1) >= SEGMENT_ECTOPY_FRACTION:
+            label, reason = "suspicious", "segment_ectopy_like_overlap"
+        elif afl_local_count >= SEGMENT_MIN_AFL_CANDIDATES and slope_types <= SEGMENT_MAX_CLEAR_AFL_SLOPE_TYPES and mean_recip < ECTOPY_STRONG_RATIO:
+            label, reason = "afl", "segment_repeated_stable_local_structure"
+        else:
+            label, reason = "suspicious", "segment_structured_but_not_clear_afl"
+        segments.append({
+            "start_index": start_index,
+            "end_index": end_index,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "duration_ms": duration_ms,
+            "label": label,
+            "reason": reason,
+            "candidate_count": candidate_count,
+            "afl_local_count": afl_local_count,
+            "ectopy_local_count": ectopy_count,
+            "slope_type_count": slope_types,
+            "mean_reciprocal_ratio": round(mean_recip, 6),
+            "candidate_rr_centers_ms": centers[:MAX_VALUE_CLUSTER_COUNT],
+        })
+    return segments
+
+
 def evaluate_window(rr_ms: np.ndarray) -> dict[str, Any]:
     rr = valid_rr(np.asarray(rr_ms, dtype=np.float64))
     base = {"label": "non_afl", "reason": "insufficient_rr", "suspicious_reason": "", "valid_rr_count": int(rr.size), "ray_match_count": 0, "ray_match_ratio": 0.0, "max_run_length": 0, "mean_run_length": 0.0, "run_count": 0, "isolated_ratio": 0.0, "matched_slopes": [], "candidate_rr_centers_ms": [], "candidate_rr_center_count": 0, "self_loop_ratio": 0.0, "reciprocal_alternation_ratio": 0.0, "afl_feature_point_count": 0, "ectopy_feature_point_count": 0}
@@ -168,8 +265,18 @@ def evaluate_window(rr_ms: np.ndarray) -> dict[str, Any]:
     local_results = [evaluate_local(rr, ratios, matched, i) for i in special_indices]
     afl_hits = [x for x in local_results if x["label"] == "afl"]
     suspicious_hits = [x for x in local_results if x["label"] == "suspicious"]
-    best = max(local_results, key=lambda x: (x["label"] == "afl", x["bridged_run"], x["special_count"]))
-    label = "afl" if afl_hits else "suspicious" if suspicious_hits else "non_afl"
+    ectopy_hits = [x for x in suspicious_hits if x["reason"] == "ectopy_like_reciprocal_pattern"]
+    best = max(local_results, key=lambda x: (x["reason"] == "ectopy_like_reciprocal_pattern", x["label"] == "afl", x["bridged_run"], x["special_count"]))
+    if ectopy_hits and afl_hits:
+        label = "suspicious"
+    elif ectopy_hits and len(ectopy_hits) >= max(2, len(afl_hits)):
+        label = "suspicious"
+    elif afl_hits:
+        label = "afl"
+    elif suspicious_hits:
+        label = "suspicious"
+    else:
+        label = "non_afl"
     slopes = [float(v) for v in matched if v is not None]
     slope_counts: dict[float, int] = {}
     for value in slopes: slope_counts[value] = slope_counts.get(value, 0) + 1
@@ -191,7 +298,7 @@ def evaluate_window(rr_ms: np.ndarray) -> dict[str, Any]:
         "self_loop_ratio": round(float(self_loops / max(ratios.size, 1)), 6),
         "reciprocal_alternation_ratio": round(float(max((x["reciprocal_ratio"] for x in local_results), default=0.0)), 6),
         "afl_feature_point_count": int(sum(x["special_count"] for x in afl_hits)),
-        "ectopy_feature_point_count": int(sum(x["special_count"] for x in suspicious_hits if x["reason"] == "ectopy_like_reciprocal_pattern")),
+        "ectopy_feature_point_count": int(sum(x["special_count"] for x in ectopy_hits)),
         "local_hit_ranges": [(int(x["range_start"]), int(x["range_end"])) for x in local_results if x["label"] in {"afl", "suspicious"}],
     })
     return base
@@ -212,28 +319,59 @@ def mask_segments(series: BeatSeries, mask: np.ndarray) -> list[dict[str, Any]]:
 
 
 def classify_series(series: BeatSeries, window_seconds: int, step_seconds: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    candidates = build_local_candidates(series)
+    candidate_segments = merge_candidate_segments(candidates)
     rows: list[dict[str, Any]] = []
     votes = np.zeros(series.rr_ms.size, dtype=np.int32)
     window_ms, step_ms = window_seconds * 1000, step_seconds * 1000
     duration_ms = int(series.offsets_ms[-1]) + window_ms if series.offsets_ms.size else 0
     for window_index, (start_ms, end_ms) in enumerate(make_windows(duration_ms, window_ms, step_ms)):
-        left = int(np.searchsorted(series.offsets_ms, start_ms, side="left"))
-        right = int(np.searchsorted(series.offsets_ms, end_ms, side="left"))
-        stats = evaluate_window(series.rr_ms[left:right])
-        if stats["label"] in {"afl", "suspicious"}:
-            for local_start, local_end in stats.get("local_hit_ranges", []):
-                vote_start = max(left + int(local_start), left)
-                vote_end = min(left + int(local_end) + 1, right)
-                votes[vote_start:vote_end] += 1
-        rows.append({"window_index": window_index, "start_ms": start_ms, "end_ms": end_ms, "duration_seconds": window_seconds, **stats, "final_label": stats["label"], "final_event_index": ""})
-    segments = mask_segments(series, votes > 0)
-    for event_index, segment in enumerate(segments, start=1):
+        overlapping = [seg for seg in candidate_segments if int(seg["start_ms"]) < end_ms and int(seg["end_ms"]) > start_ms and seg["label"] != "non_afl"]
+        afl_segments = [seg for seg in overlapping if seg["label"] == "afl"]
+        suspicious_segments = [seg for seg in overlapping if seg["label"] == "suspicious"]
+        if afl_segments and not suspicious_segments:
+            label = "afl"
+            best = max(afl_segments, key=lambda item: int(item["candidate_count"]))
+        elif afl_segments or suspicious_segments:
+            label = "suspicious"
+            best = max(overlapping, key=lambda item: int(item["candidate_count"]))
+        else:
+            label = "non_afl"
+            best = {"reason": "no_candidate_segment", "candidate_count": 0, "slope_type_count": 0, "candidate_rr_centers_ms": [], "mean_reciprocal_ratio": 0.0, "afl_local_count": 0, "ectopy_local_count": 0}
+        rows.append({
+            "window_index": window_index,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "duration_seconds": window_seconds,
+            "label": label,
+            "final_label": label,
+            "final_event_index": "",
+            "reason": best["reason"],
+            "suspicious_reason": best["reason"] if label == "suspicious" else "",
+            "valid_rr_count": int(np.sum((series.offsets_ms >= start_ms) & (series.offsets_ms < end_ms))),
+            "ray_match_count": int(best.get("candidate_count", 0)),
+            "ray_match_ratio": 0.0,
+            "max_run_length": int(best.get("candidate_count", 0)),
+            "mean_run_length": 0.0,
+            "run_count": int(len(overlapping)),
+            "isolated_ratio": 0.0,
+            "matched_slopes": [],
+            "candidate_rr_centers_ms": best.get("candidate_rr_centers_ms", []),
+            "candidate_rr_center_count": len(best.get("candidate_rr_centers_ms", [])),
+            "self_loop_ratio": 0.0,
+            "reciprocal_alternation_ratio": float(best.get("mean_reciprocal_ratio", 0.0)),
+            "afl_feature_point_count": int(best.get("afl_local_count", 0)),
+            "ectopy_feature_point_count": int(best.get("ectopy_local_count", 0)),
+        })
+    final_segments = [seg for seg in candidate_segments if seg["label"] in {"afl", "suspicious"}]
+    for event_index, segment in enumerate(final_segments, start=1):
         segment["event_index"] = event_index
-        overlap = [row for row in rows if int(row["start_ms"]) < int(segment["end_ms"]) and int(row["end_ms"]) > int(segment["start_ms"])]
-        for row in overlap: row["final_event_index"] = event_index
-        segment["window_count"] = len(overlap)
-        segment["label_counts"] = {label: sum(row["label"] == label for row in overlap) for label in ("afl", "suspicious", "non_afl")}
-    return rows, segments
+        segment["window_count"] = sum(int(row["start_ms"]) < int(segment["end_ms"]) and int(row["end_ms"]) > int(segment["start_ms"]) for row in rows)
+        segment["label_counts"] = {"afl": int(segment["label"] == "afl"), "suspicious": int(segment["label"] == "suspicious"), "non_afl": 0}
+        for row in rows:
+            if int(row["start_ms"]) < int(segment["end_ms"]) and int(row["end_ms"]) > int(segment["start_ms"]):
+                row["final_event_index"] = event_index
+    return rows, final_segments
 
 
 def config(window_seconds: int = WINDOW_SECONDS, step_seconds: int = STEP_SECONDS) -> dict[str, Any]:
@@ -243,9 +381,7 @@ def config(window_seconds: int = WINDOW_SECONDS, step_seconds: int = STEP_SECOND
 def segments_to_events(segments: list[dict[str, Any]], window_seconds: int, step_seconds: int) -> list[dict[str, Any]]:
     events = []
     for index, segment in enumerate(segments, start=1):
-        afl_count = int(segment.get("label_counts", {}).get("afl", 0))
-        suspicious_count = int(segment.get("label_counts", {}).get("suspicious", 0))
-        label = "afl" if afl_count >= suspicious_count else "suspicious"
+        label = str(segment.get("label", "suspicious"))
         subtype = "flutter" if label == "afl" else "suspicious_flutter_like"
         start_ms, end_ms = int(segment["start_ms"]), int(segment["end_ms"])
         events.append({"type": "af_family", "subtype": subtype, "layer": "rr2d_afl_structure_filter", "rule": "rr2d_local_special_point_structure", "event_index": int(segment.get("event_index", index)), "t0_ms": start_ms, "t1_ms": end_ms, "time": f"{start_ms} ms ~ {end_ms} ms", "duration": format_hms((end_ms - start_ms) / 1000.0), "stats": {"window_count": int(segment.get("window_count", 0)), "label_counts": segment.get("label_counts", {}), "config": config(window_seconds, step_seconds)}})

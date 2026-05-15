@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,7 @@ LABEL_COLORS = {
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot RR 2D filter window labels on a timeline.")
     parser.add_argument("--windows-csv", required=True, help="RR 2D filter window CSV path.")
+    parser.add_argument("--events-json", default="", help="Optional event JSON path. When provided, plot event intervals instead of full window labels.")
     parser.add_argument("--beat-csv", default="", help="Optional beat CSV for full timeline duration.")
     parser.add_argument("--out-figure", required=True, help="Output figure path, e.g. .pdf or .png.")
     parser.add_argument(
@@ -66,6 +68,27 @@ def load_windows(path: str | Path, label_column: str = "enhanced_label") -> list
             }
             for row in reader
         ]
+
+
+def load_events(path: str | Path) -> list[dict[str, Any]]:
+    event_path = Path(path)
+    if not event_path.exists():
+        return []
+    data = json.loads(event_path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        raise SystemExit(f"Events JSON must contain a list: {event_path}")
+    events: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict) or "t0_ms" not in item or "t1_ms" not in item:
+            continue
+        start_ms = int(float(item["t0_ms"]))
+        end_ms = int(float(item["t1_ms"]))
+        if end_ms <= start_ms:
+            continue
+        subtype = str(item.get("subtype", ""))
+        label = "suspicious" if subtype == "suspicious_flutter_like" else "afl" if subtype == "flutter" else subtype or "event"
+        events.append({"start_ms": start_ms, "end_ms": end_ms, "label": label, "raw_label": subtype})
+    return events
 
 
 def load_duration_ms(beat_csv: str | Path, windows: list[dict[str, Any]]) -> int:
@@ -159,10 +182,10 @@ def plot_timeline(windows: list[dict[str, Any]], duration_ms: int, out_path: str
 
 def main() -> None:
     args = parse_args()
-    windows = load_windows(args.windows_csv, label_column=args.label_column)
+    windows = load_events(args.events_json) if args.events_json else load_windows(args.windows_csv, label_column=args.label_column)
     duration_ms = load_duration_ms(args.beat_csv, windows)
     plot_timeline(windows=windows, duration_ms=duration_ms, out_path=args.out_figure)
-    print(f"windows={len(windows)}")
+    print(f"segments={len(windows)}")
     print(f"figure -> {Path(args.out_figure).resolve()}")
 
 
